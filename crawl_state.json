@@ -1,0 +1,21 @@
+{
+  "completed_urls": [
+    "https://thuvienphapluat.vn/van-ban/Bo-may-hanh-chinh/Van-ban-hop-nhat-112-VBHN-VPQH-2025-Luat-To-cao-672487.aspx",
+    "https://thuvienphapluat.vn/van-ban/Xuat-nhap-khau/Nghi-dinh-167-2025-ND-CP-sua-doi-Nghi-dinh-08-2015-ND-CP-huong-dan-Luat-Hai-quan-577436.aspx",
+    "https://thuvienphapluat.vn/van-ban/Bo-may-hanh-chinh/Nghi-dinh-02-2021-ND-CP-co-truyen-thong-co-hieu-hai-quan-hieu-phu-hieu-trang-phuc-hai-quan-461723.aspx",
+    "https://thuvienphapluat.vn/van-ban/Thuong-mai/Thong-tu-38-2023-TT-BCT-tham-dinh-giam-nhe-phat-thai-khi-nha-kinh-Cong-Thuong-593332.aspx",
+    "https://thuvienphapluat.vn/van-ban/Bao-hiem/Thong-tu-25-2025-TT-BYT-huong-dan-Luat-bao-hiem-xa-hoi-linh-vuc-y-te-639240.aspx",
+    "https://thuvienphapluat.vn/van-ban/Bao-hiem/Luat-bao-hiem-y-te-2008-25-2008-QH12-82196.aspx",
+    "https://thuvienphapluat.vn/van-ban/Thue-Phi-Le-Phi/Thong-tu-40-2021-TT-BTC-huong-dan-thue-gia-tri-gia-tang-thue-thu-nhap-ca-nhan-477635.aspx"
+  ],
+  "timestamp": "2026-05-26T17:52:08.447886",
+  "stats": {
+    "total": 7,
+    "completed": 7,
+    "failed": 0,
+    "skipped": 0,
+    "start_time": 1779792448.9476314,
+    "end_time": 1779792728.4478867
+  },
+  "output_dir": "crawl"
+}
