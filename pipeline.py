@@ -1093,7 +1093,7 @@ def run_pipeline(url: str, cookie_file: str = "cookies.txt", doc_name: str = Non
     
     print("🌐 Đang crawl...")
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False)
+        browser = p.chromium.launch(headless=True)
         context = browser.new_context()
         
         if cookie_file and os.path.exists(cookie_file):
