@@ -18,14 +18,17 @@ def normalize_appendix_breaks(text: str) -> str:
     if not text:
         return text
 
-    appendix_heading = r'(PHỤ\s+LỤC\s+(?:[IVXLCDM]+|\d+)\b)'
     text = text.replace('\r\n', '\n').replace('\r', '\n')
-    text = re.sub(r'([^\n])\s+' + appendix_heading, r'\1\n\n\2', text, flags=re.IGNORECASE | re.UNICODE)
-    text = re.sub(r'\n+[ \t]*' + appendix_heading, r'\n\n\1', text, flags=re.IGNORECASE | re.UNICODE)
-    text = re.sub(r'\n{3,}(?=PHỤ\s+LỤC\s+(?:[IVXLCDM]+|\d+)\b)', '\n\n', text, flags=re.IGNORECASE | re.UNICODE)
-    # Unnumbered PHỤ LỤC (e.g. "PHỤ LỤC MỘT SỐ BIỂU MẪU...") merged onto previous line.
-    # Strict case (no re.I) so lowercase "phụ lục" inside normal sentences is untouched.
-    text = re.sub(r'([^\n]) +(PHỤ LỤC\b)', r'\1\n\n\2', text, flags=re.UNICODE)
+    appendix_heading = r'PHỤ\s+LỤC\s+(?:[IVXLCDM]+|\d+)\b'
+
+    # Only normalize actual appendix headings that start at the beginning of a line.
+    # This avoids splitting normal prose such as "theo quy định tại Phụ lục I ...".
+    text = re.sub(r'(?m)^[ \t]*(' + appendix_heading + r')', r'\n\n\1', text, flags=re.UNICODE)
+
+    # Unnumbered PHỤ LỤC headings are treated the same way, but only at line start.
+    text = re.sub(r'(?m)^[ \t]*(PHỤ LỤC\b)', r'\n\n\1', text, flags=re.UNICODE)
+
+    text = re.sub(r'\n{3,}(?=\s*PHỤ\s+LỤC(?:\s+(?:[IVXLCDM]+|\d+)\b|\b))', '\n\n', text, flags=re.IGNORECASE | re.UNICODE)
     return text
 
 def normalize_chapter_breaks(text: str) -> str:
@@ -87,6 +90,27 @@ def clean_chunk_lines(chunk: str, title_pattern: str) -> str:
         cleaned_lines.append(line)
 
     return '\n'.join(cleaned_lines)
+
+
+def merge_chapter_with_next_article(chunks: List[Chunk], title: str) -> List[Chunk]:
+    """Keep short chapter headings in the same output chunk as the next article."""
+    merged: List[Chunk] = []
+    title_prefix = title.rstrip('.') + '. '
+    i = 0
+
+    while i < len(chunks):
+        kind, chunk = chunks[i]
+        if kind == 'chapter' and i + 1 < len(chunks) and chunks[i + 1][0] == 'article':
+            next_kind, next_chunk = chunks[i + 1]
+            combined = chunk.strip() + title_prefix + next_chunk.strip()
+            merged.append((next_kind, combined))
+            i += 2
+            continue
+
+        merged.append((kind, chunk))
+        i += 1
+
+    return merged
 
 
 def split_into_chunks(text: str) -> List[Chunk]:
@@ -350,6 +374,7 @@ def format_file(src_path: Path, out_dir: Path) -> Tuple[Path, int, bool]:
             cleaned_chunks.append((kind, c_cleaned))
 
     chunks = cleaned_chunks
+    chunks = merge_chapter_with_next_article(chunks, title)
     out_dir.mkdir(parents=True, exist_ok=True)
     master_name = src_path.stem + '.txt'
     master_path = out_dir / master_name
