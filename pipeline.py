@@ -21,7 +21,7 @@ import sys
 from bs4 import BeautifulSoup, NavigableString, Tag, Comment
 from playwright.sync_api import sync_playwright
 from table_converter import is_data_table, process_tables_in_content
-from urllib.parse import unquote, urljoin
+from urllib.parse import quote, unquote, urljoin
 
 def load_cookies_from_file(cookie_file: str) -> list:
     """
@@ -224,9 +224,9 @@ def extract_direct_form_url(element) -> str:
 
     return ""
 
-FORM_REQUEST_CONCURRENCY = 4
-FORM_REQUEST_DELAY_RANGE = (0.0, 0.15)
-FORM_BATCH_PAUSE_RANGE = (0.15, 0.5)
+FORM_REQUEST_CONCURRENCY = 1
+FORM_REQUEST_DELAY_RANGE = (1.2, 2.8)
+FORM_BATCH_PAUSE_RANGE = (1.0, 2.0)
 FORM_RATE_LIMIT_BACKOFF_BASE = 2.5
 FORM_RATE_LIMIT_COOLDOWN = 4.0
 FORM_SECOND_PASS_DELAY = 0.5
@@ -265,16 +265,80 @@ def extract_download_url_from_ajax_response(response_text: str) -> str:
 
     return ""
 
+def build_docforms_base_url(law_id: str) -> str:
+    """Build the TVPL DocForms folder URL from a LawID, e.g. 639240 -> /6/3/9/2/639240//."""
+    if not law_id or not law_id.isdigit():
+        return ""
+    prefix = "/".join(law_id[:4])
+    return f"https://files.thuvienphapluat.vn/uploads/DocForms/{prefix}/{law_id}//"
+
+def roman_to_int(value: str) -> int:
+    values = {"I": 1, "V": 5, "X": 10, "L": 50, "C": 100, "D": 500, "M": 1000}
+    total = 0
+    previous = 0
+    for char in reversed((value or "").upper()):
+        current = values.get(char, 0)
+        if current < previous:
+            total -= current
+        else:
+            total += current
+            previous = current
+    return total
+
+def infer_form_template_url(template_text: str, law_id: str, element=None) -> str:
+    """
+    Infer TVPL DocForms URL when AJAX is rate-limited.
+
+    TVPL stores form templates under a deterministic LawID folder and filenames
+    usually follow anchors like bieumau_ms_5_pl_2_1 -> "Mẫu số 05.pl2.doc".
+    """
+    base_url = build_docforms_base_url(law_id)
+    if not base_url:
+        return ""
+
+    name = element.get("name", "") if element else ""
+    element_id = element.get("id", "") if element else ""
+    marker = " ".join(part for part in (name, element_id, template_text or "") if part)
+
+    number_match = re.search(r"bieumau_ms_(\d+)", marker, re.I)
+    if not number_match:
+        number_match = re.search(r"mẫu\s+số\s+(\d+)", marker, re.I | re.U)
+    if not number_match:
+        return ""
+
+    form_number = int(number_match.group(1))
+    appendix_number = None
+
+    appendix_match = re.search(r"_pl_(\d+)", marker, re.I)
+    if appendix_match:
+        appendix_number = int(appendix_match.group(1))
+    else:
+        appendix_match = re.search(r"phụ\s+lục\s+([IVXLCDM]+|\d+)", marker, re.I | re.U)
+        if appendix_match:
+            appendix_raw = appendix_match.group(1)
+            appendix_number = int(appendix_raw) if appendix_raw.isdigit() else roman_to_int(appendix_raw)
+
+    if not appendix_number:
+        return ""
+
+    filename = f"Mẫu số {form_number:02d}.pl{appendix_number}.doc"
+    return base_url + quote(filename, safe="")
+
 def resolve_form_template_url(page, template_text: str, law_id: str, bookmark_id: str, element=None, retry_count: int = 0) -> str:
     """Resolve form URL from LoadBieuMau response, then direct HTML fallback."""
+    direct_url = extract_direct_form_url(element)
+    if direct_url:
+        return direct_url
+
     if law_id and bookmark_id:
         ajax_url = fetch_form_template_url(page, law_id, bookmark_id, template_text=template_text, retry_count=retry_count)
         if ajax_url:
             return ajax_url
 
-    direct_url = extract_direct_form_url(element)
-    if direct_url:
-        return direct_url
+    inferred_url = infer_form_template_url(template_text, law_id, element=element)
+    if inferred_url:
+        print(f"      ↪ Fallback URL suy luận: {template_text} -> {inferred_url}")
+        return inferred_url
 
     return ""
 
@@ -416,7 +480,7 @@ def fetch_form_template_urls_batch(page, requests: list, concurrency: int = FORM
         {"requests": requests, "concurrency": concurrency},
     )
 
-def fetch_form_template_url(page, law_id: str, bookmark_id: str, template_text: str = "", retry_count: int = 0, max_retries: int = 5) -> str:
+def fetch_form_template_url(page, law_id: str, bookmark_id: str, template_text: str = "", retry_count: int = 0, max_retries: int = 1) -> str:
     """
     Gọi AJAX endpoint để lấy URL download của biểu mẫu.
     Returns: Full URL thật parse từ response, hoặc empty string nếu fail.
@@ -538,64 +602,15 @@ def process_form_templates(page, content_div, base_url: str) -> dict:
         else:
             retry_templates.append((template_text, law_id, bookmark_id, element))
 
-    random.shuffle(ajax_templates)
-
     if ajax_templates:
-        pending = ajax_templates[:]
-        attempt = 0
-        while pending and attempt <= 2:
-            if attempt > 0:
-                time.sleep(FORM_SECOND_PASS_DELAY * attempt + random.uniform(0.0, 0.5))
+        for template_text, law_id, bookmark_id, element in ajax_templates:
+            wait_between_form_requests()
+            download_url = resolve_and_replace_form_template(page, template_text, law_id, bookmark_id, element)
 
-            batch_size = FORM_REQUEST_CONCURRENCY if attempt == 0 else 1
-            next_pending = []
-
-            for start in range(0, len(pending), batch_size):
-                batch = pending[start:start + batch_size]
-                batch_payload = [
-                    {"templateText": template_text, "lawId": law_id, "bookmarkId": bookmark_id}
-                    for template_text, law_id, bookmark_id, _ in batch
-                ]
-
-                results = fetch_form_template_urls_batch(page, batch_payload, concurrency=min(batch_size, FORM_REQUEST_CONCURRENCY))
-                for (template_text, law_id, bookmark_id, element), result in zip(batch, results):
-                    if not result:
-                        if attempt < 2:
-                            next_pending.append((template_text, law_id, bookmark_id, element))
-                        else:
-                            print(f"   ⚠️  Bỏ qua: {template_text} (empty batch result)")
-                        continue
-
-                    if not result.get("ok"):
-                        if attempt < 2:
-                            next_pending.append((template_text, law_id, bookmark_id, element))
-                        else:
-                            print(f"   ⚠️  Bỏ qua: {template_text} ({result.get('error', 'error')})")
-                        continue
-
-                    response_text = result.get("text", "")
-                    download_url, status, detail = parse_form_ajax_response(response_text)
-
-                    if download_url:
-                        FORM_AJAX_CACHE[(law_id, bookmark_id)] = download_url
-                        markdown_link = f" [{template_text}]({download_url})"
-                        element.replace_with(markdown_link)
-                        template_urls[template_text] = download_url
-                        continue
-
-                    if status in {"rate-limit", "cloudflare"} and attempt < 2:
-                        next_pending.append((template_text, law_id, bookmark_id, element))
-                    else:
-                        print(f"   ⚠️  Bỏ qua: {template_text} ({detail})")
-
-                wait_between_form_batches()
-
-            if not next_pending:
-                break
-
-            print(f"   ⏳ Retry {len(next_pending)} biểu mẫu bị chặn (lượt {attempt + 1})...")
-            pending = next_pending
-            attempt += 1
+            if download_url:
+                template_urls[template_text] = download_url
+            else:
+                print(f"   ⚠️  Bỏ qua: {template_text}")
 
     for template_text, law_id, bookmark_id, element in retry_templates:
         print(f"   🔁 Retry direct fallback: {template_text}")
@@ -757,14 +772,17 @@ def normalize_appendix_breaks(text: str) -> str:
     if not text:
         return text
 
-    appendix_heading = r'(PHỤ\s+LỤC\s+(?:[IVXLCDM]+|\d+)\b)'
     text = text.replace('\r\n', '\n').replace('\r', '\n')
-    text = re.sub(r'([^\n])\s+' + appendix_heading, r'\1\n\n\2', text, flags=re.I | re.U)
-    text = re.sub(r'\n+[ \t]*' + appendix_heading, r'\n\n\1', text, flags=re.I | re.U)
-    text = re.sub(r'\n{3,}(?=PHỤ\s+LỤC\s+(?:[IVXLCDM]+|\d+)\b)', '\n\n', text, flags=re.I | re.U)
-    # Unnumbered PHỤ LỤC (e.g. "PHỤ LỤC MỘT SỐ BIỂU MẪU...") merged onto previous line.
-    # Use strict case (no re.I) so lowercase "phụ lục" inside normal sentences is untouched.
-    text = re.sub(r'([^\n]) +(PHỤ LỤC\b)', r'\1\n\n\2', text, flags=re.U)
+    appendix_heading = r'PHỤ\s+LỤC\s+(?:[IVXLCDM]+|\d+)\b'
+
+    # Only normalize actual appendix headings that start at the beginning of a line.
+    # This avoids splitting normal prose such as "theo quy định tại Phụ lục I ...".
+    text = re.sub(r'(?m)^[ \t]*(' + appendix_heading + r')', r'\n\n\1', text, flags=re.U)
+
+    # Unnumbered PHỤ LỤC headings are treated the same way, but only at line start.
+    text = re.sub(r'(?m)^[ \t]*(PHỤ LỤC\b)', r'\n\n\1', text, flags=re.U)
+
+    text = re.sub(r'\n{3,}(?=\s*PHỤ\s+LỤC(?:\s+(?:[IVXLCDM]+|\d+)\b|\b))', '\n\n', text, flags=re.I | re.U)
     return text
 
 def process_element_with_hover(soup: BeautifulSoup, content_div) -> None:

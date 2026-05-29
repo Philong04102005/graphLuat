@@ -213,9 +213,9 @@ class BatchCrawler:
                 cwd=os.getcwd(),
                 capture_output=True,
                 text=True,
-                encoding='utf-8',          # 👈 Thêm dòng này
-                errors='replace',          # 👈 Thay ký tự lỗi bằng 
-                timeout=300
+                encoding='utf-8',
+                errors='replace',
+                timeout=900
             )
 
             if result.returncode == 0:
@@ -294,7 +294,7 @@ class BatchCrawler:
                 return False, error_msg
 
         except subprocess.TimeoutExpired:
-            error_msg = "Pipeline timeout sau 5 phút"
+            error_msg = "Pipeline timeout sau 15 phút"
             with self.print_lock:
                 print(f"   [{threading.current_thread().name}] ⏰ {error_msg}")
             return False, error_msg

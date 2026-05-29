@@ -140,6 +140,27 @@ def clean_chunk_lines(chunk: str, title_pattern: str) -> str:
     return '\n'.join(cleaned_lines)
 
 
+def merge_chapter_with_next_article(chunks: List[Chunk], title: str) -> List[Chunk]:
+    """Keep short chapter headings in the same output chunk as the next article."""
+    merged: List[Chunk] = []
+    title_prefix = title.rstrip('.') + '. '
+    i = 0
+
+    while i < len(chunks):
+        kind, chunk = chunks[i]
+        if kind == 'chapter' and i + 1 < len(chunks) and chunks[i + 1][0] == 'article':
+            next_kind, next_chunk = chunks[i + 1]
+            combined = chunk.strip() + title_prefix + next_chunk.strip()
+            merged.append((next_kind, combined))
+            i += 2
+            continue
+
+        merged.append((kind, chunk))
+        i += 1
+
+    return merged
+
+
 def split_into_chunks(text: str) -> List[Chunk]:
     text = text.replace('\r\n', '\n').replace('\r', '\n')
     text = normalize_appendix_breaks(text)
@@ -500,6 +521,7 @@ def format_file(src_path: Path, out_dir: Path) -> Tuple[Path, int, bool]:
             cleaned_chunks.append((kind, c_cleaned))
 
     chunks = cleaned_chunks
+    chunks = merge_chapter_with_next_article(chunks, title)
     out_dir.mkdir(parents=True, exist_ok=True)
     master_name = src_path.stem + '.txt'
     master_path = out_dir / master_name
