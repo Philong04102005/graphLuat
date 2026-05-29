@@ -72,16 +72,24 @@ Văn bản được format với:
 
 ```
 thuvienphapluat-crawler/
-├── pipeline.py      # Pipeline hoàn chỉnh (khuyên dùng)
-├── main.py          # Module crawl
-├── postprocess.py   # Module xử lý text
-├── cookies.txt      # File cookies (tự tạo)
-├── output.txt       # Output thô
-└── output_processed.txt  # Output đã xử lý
+├── pipeline.py             # Pipeline crawl và trích xuất nội dung chính
+├── batch_crawler.py        # Công cụ crawl hàng loạt nhiều URL
+├── main.py                 # Module crawl độc lập
+├── postprocess.py          # Module xử lý text
+├── format.py               # Format văn bản thông thường và văn bản hợp nhất
+├── format_bosung.py        # Format văn bản sửa đổi, bổ sung
+├── format_hopnhat.py       # Format bổ sung cho văn bản hợp nhất
+├── cookies.txt             # File cookies (tự tạo)
+├── output.txt              # Output thô
+└── output_processed.txt    # Output đã xử lý
 ```
 
-## Hướng dẫn cách dùng
+## Luồng xử lý theo loại văn bản
 
-- Đối với văn bản hợp nhất: batch_crawler.py -> format.py -> format_hopnhat.py
-- Đối với văn bản sửa đổi/ bổ sung: batch_crawler.py -> format_bosung.py
-- Đối với văn bản còn lại: batch_crawler.py -> format.py
+Tùy theo loại văn bản, sử dụng luồng xử lý phù hợp để đảm bảo nội dung được format đúng cấu trúc:
+
+- **Văn bản sửa đổi, bổ sung**: `batch_crawler.py` → `format_bosung.py`
+- **Văn bản hợp nhất**: `batch_crawler.py` → `format.py` → `format_hopnhat.py`
+- **Các văn bản còn lại**: `batch_crawler.py` → `format.py`
+
+> Khi cần crawl nhiều URL cùng lúc, xem thêm `README_batch_crawler.md` để sử dụng `batch_crawler.py` với cơ chế đa luồng, retry, resume và quản lý output theo thư mục.

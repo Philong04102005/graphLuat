@@ -43,6 +43,40 @@ Batch crawler này **KHÔNG** implement lại logic crawl mà **gọi trực ti�
 - ✅ **Dùng lại toàn bộ features** của pipeline
 - ✅ **Tổ chức files gọn gàng** trong thư mục riêng
 
+## Luồng chạy tổng quát
+
+`batch_crawler.py` đóng vai trò điều phối quá trình crawl hàng loạt. Công cụ đọc danh sách URL từ file input, đưa các URL hợp lệ vào hàng đợi, sau đó phân phối cho các worker thread để xử lý song song. Mỗi worker gọi pipeline crawl tương ứng, lưu kết quả vào output directory và cập nhật trạng thái xử lý.
+
+Quy trình tổng quát:
+
+1. Đọc danh sách URL từ file input.
+2. Bỏ qua dòng trống hoặc dòng comment bắt đầu bằng `#`.
+3. Khởi tạo hàng đợi URL và các worker thread theo tham số `--threads`.
+4. Mỗi worker lấy URL từ queue và gọi pipeline xử lý.
+5. Kết quả crawl được lưu vào thư mục output đã cấu hình.
+6. URL thành công được ghi nhận vào state.
+7. URL lỗi được retry theo số lần cấu hình bằng `--retry`.
+8. URL vẫn thất bại sau retry được ghi vào `failed_urls.txt`.
+9. Trạng thái crawl được lưu vào `crawl_state.json` để hỗ trợ resume.
+10. Khi chạy lại với `--resume`, chương trình chỉ xử lý các URL chưa hoàn thành.
+
+## Luồng xử lý theo loại văn bản
+
+Sau khi crawl, từng loại văn bản cần được đưa qua luồng format phù hợp để đảm bảo cấu trúc đầu ra chính xác:
+
+- **Văn bản sửa đổi, bổ sung**: `batch_crawler.py` → `format_bosung.py`
+- **Văn bản hợp nhất**: `batch_crawler.py` → `format.py` → `format_hopnhat.py`
+- **Các văn bản còn lại**: `batch_crawler.py` → `format.py`
+
+Trong đó, văn bản sửa đổi, bổ sung được tách riêng vì cần xử lý chi tiết đến từng khoản. Văn bản hợp nhất cần đi qua bước format chung trước khi áp dụng bước xử lý chuyên biệt cho văn bản hợp nhất.
+
+## Các cải tiến đã thực hiện
+
+- **`batch_crawler.py`**: Nâng timeout khi gọi pipeline để hạn chế crash hoặc timeout sớm khi gặp văn bản quá dài, giúp quá trình crawl ổn định hơn.
+- **`pipeline.py`**: Cải thiện logic trích xuất để lấy được đầy đủ nội dung văn bản và phần viện dẫn liên quan.
+- **`format.py`**: Chỉnh lại cơ chế nhận diện cấu trúc văn bản, tách riêng Chương và Điều, đồng thời chuẩn hóa cách xuống dòng để output dễ đọc hơn.
+- **`format_bosung.py`**: Bổ sung module format riêng cho văn bản sửa đổi, bổ sung. Loại văn bản này cần tách nội dung đến từng khoản nên được xử lý riêng thay vì dùng chung với các văn bản còn lại.
+
 ## Cài đặt
 
 ```bash
@@ -208,9 +242,9 @@ python batch_crawler.py urls.txt --threads 8 --delay 0.5 1.5 --output-dir fast_c
    - Kiểm tra dependencies: `uv sync`
    - Xem stderr output để chi tiết lỗi
 
-2. **"Pipeline timeout sau 5 phút"**
-   - URL quá chậm hoặc server response chậm
-   - Tăng timeout trong code nếu cần
+2. **"Pipeline timeout"**
+   - URL quá chậm, server phản hồi chậm hoặc văn bản quá dài
+   - Timeout trong `batch_crawler.py` đã được nâng để giảm lỗi với văn bản dài; nếu vẫn gặp lỗi, có thể tiếp tục tăng timeout trong code
 
 3. **"Không tìm thấy file output"**
    - Pipeline output format đã thay đổi
@@ -281,7 +315,7 @@ python batch_crawler.py urls.txt --output-dir crawl
 ## Architecture Details
 
 ### Subprocess Management
-- `subprocess.run()` với timeout 5 phút
+- `subprocess.run()` với timeout đã được nâng để xử lý tốt hơn các văn bản dài
 - `os.chdir()` để change đến output directory
 - Full path resolution cho cookies file
 - Capture stdout/stderr cho debugging
