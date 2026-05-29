@@ -131,8 +131,10 @@ uv run python pipeline.py --help
 
 ```bash
 # Chỉ crawl
+# Chỉ crawl
 uv run python main.py
 
+# Chỉ postprocess
 # Chỉ postprocess
 uv run python postprocess.py
 ```
@@ -147,6 +149,12 @@ uv run python postprocess.py
 
 ## Output
 
+Sau khi chạy xong, hệ thống sinh ra:
+
+- File `.txt` đã crawl và postprocess.
+- File `*_data_url.json` nếu văn bản có biểu mẫu hoặc link download cần lưu mapping.
+
+Trong nội dung output:
 Sau khi chạy xong, hệ thống sinh ra:
 
 - File `.txt` đã crawl và postprocess.
@@ -169,7 +177,9 @@ thuvienphapluat-crawler/
 ├── main.py                 # Module crawl độc lập
 ├── postprocess.py          # Module xử lý text
 ├── format.py               # Format văn bản thường và văn bản hợp nhất
+├── format.py               # Format văn bản thường và văn bản hợp nhất
 ├── format_bosung.py        # Format văn bản sửa đổi, bổ sung
+├── format_hopnhat.py       # Resolve footnote cho văn bản hợp nhất
 ├── format_hopnhat.py       # Resolve footnote cho văn bản hợp nhất
 ├── cookies.txt             # File cookies (tự tạo)
 ├── output.txt              # Output thô
@@ -178,10 +188,16 @@ thuvienphapluat-crawler/
 
 ## Luồng Xử Lý Theo Loại Văn Bản
 
+## Luồng Xử Lý Theo Loại Văn Bản
+
+## Luồng Xử Lý Theo Loại Văn Bản
+
+Tùy theo loại văn bản, hệ thống đi theo luồng format khác nhau để đảm bảo output đúng cấu trúc:
 Tùy theo loại văn bản, hệ thống đi theo luồng format khác nhau để đảm bảo output đúng cấu trúc:
 
 - **Văn bản sửa đổi, bổ sung**: `batch_crawler.py` → `format_bosung.py`
 - **Văn bản hợp nhất**: `batch_crawler.py` → `format.py` → `format_hopnhat.py`
 - **Các văn bản còn lại**: `batch_crawler.py` → `format.py`
 
+> Khi cần crawl nhiều URL cùng lúc, xem thêm `README_batch_crawler.md` để dùng `batch_crawler.py` với cơ chế đa luồng, retry, resume và quản lý output theo thư mục.
 > Khi cần crawl nhiều URL cùng lúc, xem thêm `README_batch_crawler.md` để dùng `batch_crawler.py` với cơ chế đa luồng, retry, resume và quản lý output theo thư mục.
