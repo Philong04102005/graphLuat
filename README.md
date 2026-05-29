@@ -188,10 +188,6 @@ thuvienphapluat-crawler/
 
 ## Luồng Xử Lý Theo Loại Văn Bản
 
-## Luồng Xử Lý Theo Loại Văn Bản
-
-## Luồng Xử Lý Theo Loại Văn Bản
-
 Tùy theo loại văn bản, hệ thống đi theo luồng format khác nhau để đảm bảo output đúng cấu trúc:
 Tùy theo loại văn bản, hệ thống đi theo luồng format khác nhau để đảm bảo output đúng cấu trúc:
 
