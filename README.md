@@ -1,16 +1,83 @@
 # ThưViệnPhápLuật Crawler
 
-Công cụ crawl và xử lý văn bản pháp luật từ thuvienphapluat.vn
+Công cụ crawl và xử lý văn bản pháp luật từ `thuvienphapluat.vn`, tập trung vào việc giữ đúng cấu trúc văn bản và xử lý các phần nội dung đặc thù như biểu mẫu, phụ lục, footnote, ảnh đính kèm và công thức toán.
 
-## Tính năng
+## Mục Tiêu
 
-- ✅ Crawl nội dung văn bản pháp luật
-- ✅ Trích xuất nội dung hover tooltip (sửa đổi, bãi bỏ, hướng dẫn)
-- ✅ Tự động format với tên văn bản trước mỗi Điều
-- ✅ Tự động phát hiện tên văn bản từ URL
-- ✅ Hỗ trợ đăng nhập bằng cookies
+- Crawl nội dung văn bản pháp luật từ trang nguồn.
+- Giữ lại đầy đủ các phần quan trọng của văn bản sau khi render DOM.
+- Chuẩn hóa output để dễ đọc, dễ search và dễ dùng lại cho downstream.
+- Xử lý riêng các nhóm nội dung đã được cải thiện:
+  - IV. Mẫu Đơn & Link Download
+  - VI. Phụ Lục Kèm Theo
+  - VIII. Văn Bản Hợp Nhất & Footnote
+  - IX. Hình Ảnh Đính Kèm
+  - X. Các công thức toán
 
-## Cài đặt
+## Luồng Chạy Tổng Quát
+
+Luồng xử lý hiện tại đi theo thứ tự sau:
+
+1. Nhận URL văn bản đầu vào.
+2. Mở trang bằng Playwright, render JavaScript và chờ nội dung động hoàn tất.
+3. Nếu có `cookies.txt`, hệ thống nạp cookies để truy cập được nội dung tooltip hoặc biểu mẫu cần quyền cao hơn.
+4. Trích xuất nội dung HTML từ khối văn bản chính.
+5. Xử lý tooltip sửa đổi, bãi bỏ, hướng dẫn, ghi chú nội dung.
+6. Xử lý biểu mẫu và link download của mẫu đơn/phụ lục.
+7. Chuyển bảng dữ liệu sang Markdown khi phù hợp.
+8. Giữ lại ảnh đính kèm dưới dạng Markdown image.
+9. Giữ cấu trúc công thức bằng cách bảo toàn `sub/sup` và chuẩn hóa một số phép toán.
+10. Postprocess để tách Chương, Điều, Phụ lục và chuẩn hóa xuống dòng.
+11. Ghi file output `.txt`.
+12. Nếu có biểu mẫu, ghi thêm file mapping `*_data_url.json`.
+
+## Các Điểm Đã Cải Thiện
+
+### IV. Mẫu Đơn & Link Download
+
+- Hệ thống đã bổ sung bước nhận diện biểu mẫu từ HTML thay vì chỉ dựa vào text hiển thị.
+- Nếu link download có sẵn trong DOM, crawler sẽ lấy trực tiếp link đó.
+- Nếu link không có sẵn, crawler gọi AJAX `LoadBieuMau` để lấy URL thật của file biểu mẫu.
+- Có thêm cơ chế retry và xử lý rate limit để giảm lỗi khi TVPL giới hạn tần suất truy cập.
+- Nếu AJAX không trả link trực tiếp, hệ thống có fallback suy luận URL theo `LawID`, `Bookmark_ID` và tên file chuẩn.
+- Các link biểu mẫu lấy được sẽ được thay thế bằng Markdown link trong output và đồng thời lưu ra file JSON mapping.
+
+### VI. Phụ Lục Kèm Theo
+
+- Chuẩn hóa `PHỤ LỤC` khi nó bị dính liền với đoạn trước đó sau khi render HTML.
+- Chỉ tách khi `PHỤ LỤC` xuất hiện ở đầu dòng, để tránh cắt nhầm các câu văn bình thường có cụm “Phụ lục I...”.
+- Hỗ trợ cả phụ lục đánh số La Mã và số thường.
+- Khi format, phụ lục được giữ như một phần có cấu trúc riêng, không bị hòa vào nội dung điều trước đó.
+
+### VIII. Văn Bản Hợp Nhất & Footnote
+
+- Bổ sung xử lý footnote để đưa nội dung chú thích từ cuối văn bản về đúng vị trí inline.
+- Có cơ chế nhận diện định nghĩa footnote ở cuối file và xóa các block watermark/metadata thừa đi kèm.
+- Với văn bản hợp nhất, phần footnote được giữ theo ngữ cảnh thật của văn bản thay vì để rơi xuống cuối file.
+- Có thêm các fix format để giảm lỗi hiển thị heading Chương/Điều bị lặp hoặc dính note.
+
+### IX. Hình Ảnh Đính Kèm
+
+- Khi render DOM, thẻ `<img>` không bị mất mà được chuyển thành Markdown image `![](url)`.
+- URL ảnh được normalize về absolute URL nếu HTML dùng link tương đối hoặc `//...`.
+- Cách này giúp giữ lại hình minh họa, sơ đồ hoặc ảnh đính kèm có ý nghĩa trong văn bản gốc.
+
+### X. Các Công Thức Toán
+
+- Hệ thống giữ lại cấu trúc toán học cơ bản bằng cách render `<sub>` và `<sup>` thành dạng LaTeX-like `_{} / ^{}`.
+- Chỉ chuẩn hóa phép nhân sang `\times` ở các dòng có dấu hiệu là công thức, tránh làm sai các đoạn text thường.
+- Nhờ vậy công thức trong output dễ đọc hơn nhưng vẫn giữ được ngữ nghĩa tương đối sát bản gốc.
+
+## Tính Năng
+
+- Crawl nội dung văn bản pháp luật
+- Trích xuất nội dung hover tooltip: sửa đổi, bãi bỏ, hướng dẫn
+- Tự động format với tên văn bản trước mỗi Điều
+- Tự động phát hiện tên văn bản từ URL
+- Hỗ trợ đăng nhập bằng cookies
+- Giữ lại biểu mẫu, phụ lục, hình ảnh và công thức trong output
+
+## Cài Đặt
 
 ```bash
 # Clone repo
@@ -24,9 +91,9 @@ uv sync
 uv run playwright install chromium
 ```
 
-## Sử dụng
+## Sử Dụng
 
-### Pipeline hoàn chỉnh (khuyên dùng)
+### Pipeline Hoàn Chỉnh
 
 ```bash
 # Crawl một văn bản
@@ -42,54 +109,61 @@ uv run python pipeline.py "https://thuvienphapluat.vn/van-ban/..." --doc-name "L
 uv run python pipeline.py --help
 ```
 
-### Sử dụng riêng từng module
+### Sử Dụng Từng Module
 
 ```bash
-# Chỉ crawl (không postprocess)
+# Chỉ crawl
 uv run python main.py
 
-# Chỉ postprocess (từ output.txt có sẵn)
+# Chỉ postprocess
 uv run python postprocess.py
 ```
 
-## Cookies (để lấy tooltip)
+## Cookies
 
-Để lấy được nội dung tooltip (thông tin sửa đổi, bãi bỏ...), bạn cần có tài khoản Pro trên thuvienphapluat.vn.
+Để lấy được nội dung tooltip và một số link biểu mẫu, cần có tài khoản Pro trên `thuvienphapluat.vn`.
 
-1. Đăng nhập vào thuvienphapluat.vn trên trình duyệt
-2. Export cookies bằng extension [Get cookies.txt LOCALLY](https://chrome.google.com/webstore/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc)
-3. Lưu file `cookies.txt` vào thư mục project
+1. Đăng nhập vào `thuvienphapluat.vn` trên trình duyệt.
+2. Export cookies bằng extension [Get cookies.txt LOCALLY](https://chrome.google.com/webstore/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc).
+3. Lưu file `cookies.txt` vào thư mục project.
 
 ## Output
 
-Văn bản được format với:
+Sau khi chạy xong, hệ thống sinh ra:
 
-- Tên văn bản trước mỗi Điều: `Nghị định 47/2021/NĐ-CP. Điều 1. ...`
-- Thông tin tooltip trong dấu `[]`: `[Điều này bị bãi bỏ bởi...]`
-- Phân tách Chương, Mục, Điều rõ ràng
+- File `.txt` đã crawl và postprocess.
+- File `*_data_url.json` nếu văn bản có biểu mẫu hoặc link download cần lưu mapping.
 
-## Cấu trúc project
+Trong nội dung output:
 
-```
+- Tên văn bản được đưa trước mỗi Điều: `Nghị định 47/2021/NĐ-CP. Điều 1. ...`
+- Tooltip được đặt trong dấu `[]`: `[Điều này bị bãi bỏ bởi...]`
+- Phụ lục được tách riêng rõ ràng
+- Ảnh đính kèm được giữ dưới dạng Markdown image
+- Công thức toán được giữ theo cấu trúc gần với bản gốc hơn
+
+## Cấu Trúc Project
+
+```text
 thuvienphapluat-crawler/
 ├── pipeline.py             # Pipeline crawl và trích xuất nội dung chính
 ├── batch_crawler.py        # Công cụ crawl hàng loạt nhiều URL
 ├── main.py                 # Module crawl độc lập
 ├── postprocess.py          # Module xử lý text
-├── format.py               # Format văn bản thông thường và văn bản hợp nhất
+├── format.py               # Format văn bản thường và văn bản hợp nhất
 ├── format_bosung.py        # Format văn bản sửa đổi, bổ sung
-├── format_hopnhat.py       # Format bổ sung cho văn bản hợp nhất
+├── format_hopnhat.py       # Resolve footnote cho văn bản hợp nhất
 ├── cookies.txt             # File cookies (tự tạo)
 ├── output.txt              # Output thô
 └── output_processed.txt    # Output đã xử lý
 ```
 
-## Luồng xử lý theo loại văn bản
+## Luồng Xử Lý Theo Loại Văn Bản
 
-Tùy theo loại văn bản, sử dụng luồng xử lý phù hợp để đảm bảo nội dung được format đúng cấu trúc:
+Tùy theo loại văn bản, hệ thống đi theo luồng format khác nhau để đảm bảo output đúng cấu trúc:
 
 - **Văn bản sửa đổi, bổ sung**: `batch_crawler.py` → `format_bosung.py`
 - **Văn bản hợp nhất**: `batch_crawler.py` → `format.py` → `format_hopnhat.py`
 - **Các văn bản còn lại**: `batch_crawler.py` → `format.py`
 
-> Khi cần crawl nhiều URL cùng lúc, xem thêm `README_batch_crawler.md` để sử dụng `batch_crawler.py` với cơ chế đa luồng, retry, resume và quản lý output theo thư mục.
+> Khi cần crawl nhiều URL cùng lúc, xem thêm `README_batch_crawler.md` để dùng `batch_crawler.py` với cơ chế đa luồng, retry, resume và quản lý output theo thư mục.
