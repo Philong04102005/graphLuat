@@ -102,7 +102,7 @@ def merge_chapter_with_next_article(chunks: List[Chunk], title: str) -> List[Chu
         kind, chunk = chunks[i]
         if kind == 'chapter' and i + 1 < len(chunks) and chunks[i + 1][0] == 'article':
             next_kind, next_chunk = chunks[i + 1]
-            combined = chunk.strip() + title_prefix + next_chunk.strip()
+            combined = chunk.strip() + '\n' + title_prefix + next_chunk.strip()
             merged.append((next_kind, combined))
             i += 2
             continue
