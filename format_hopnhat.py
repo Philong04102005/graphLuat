@@ -30,7 +30,7 @@ def resolve_footnotes(text: str) -> str:
     # BƯỚC 1: Tìm tất cả vị trí xuất hiện [n]
     occurrences = {}
     for idx, line in enumerate(lines):
-        for m in re.finditer(r'\[(\d+)\]', line):
+        for m in re.finditer(r'\[\s*(\d+)\s*\]', line):
             num = m.group(1)
             occurrences.setdefault(num, []).append(idx)
 
@@ -44,14 +44,14 @@ def resolve_footnotes(text: str) -> str:
 
         def_idx = positions[1]
         line = lines[def_idx]
-        m = re.match(rf'^\s*\[{num}\]\s*(.*)$', line)
+        m = re.match(rf'^\s*\[\s*{num}\s*\]\s*(.*)$', line)
         if not m:
             continue
 
         # Thu thập nội dung qua các dòng trống, dừng khi gặp footnote tiếp theo hoặc hết file
         content_parts = [m.group(1).strip()]
         j = def_idx + 1
-        while j < n and not re.match(r'^\s*\[\d+\]\s*', lines[j]):
+        while j < n and not re.match(r'^\s*\[\s*\d+\s*\]\s*', lines[j]):
             if lines[j].strip():
                 content_parts.append(lines[j].strip())
             j += 1
@@ -74,11 +74,11 @@ def resolve_footnotes(text: str) -> str:
         end_substitution = False
 
         for num, content in replacements.items():
-            if f'[{num}]' in new_line:
+            if re.search(rf'\[\s*{num}\s*\]', new_line):
                 # Chỉ trigger continuation khi [n] ở cuối dòng AND dòng là heading chương/mục
-                if re.search(rf'\[{num}\]\s*$', line) and _HEADING_RE.match(line):
+                if re.search(rf'\[\s*{num}\s*\]\s*$', line) and _HEADING_RE.match(line):
                     end_substitution = True
-                new_line = re.sub(rf'\[{num}\]', f'[{content}]', new_line)
+                new_line = re.sub(rf'\[\s*{num}\s*\]', f'[{content}]', new_line)
 
         line_modifications[idx] = new_line
 
@@ -98,13 +98,13 @@ def resolve_footnotes(text: str) -> str:
                 if _is_doc_watermark(stripped) or _is_metadata_block_start(stripped):
                     # Xóa toàn bộ watermark + metadata cho đến định nghĩa footnote
                     while j < n and j not in to_delete:
-                        if re.match(r'^\s*\[\d+\]\s*', lines[j]):
+                        if re.match(r'^\s*\[\s*\d+\s*\]\s*', lines[j]):
                             break
                         continuation_deletes.add(j)
                         j += 1
                     break
 
-                if re.match(r'^\s*\[\d+\]\s*', stripped):
+                if re.match(r'^\s*\[\s*\d+\s*\]\s*', stripped):
                     break
 
                 parts.append(stripped)

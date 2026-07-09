@@ -91,6 +91,70 @@ def normalize_stuck_article_breaks(text: str) -> str:
 
     return article_after_punctuation_re.sub(repl, text)
 
+# Tập chữ CÁI IN HOA tiếng Việt (không dùng dải [À-Ỹ] vì dải này lẫn cả
+# chữ thường như đ, ư, ơ...). Dùng để nhận diện chữ mở đầu tiêu đề Điều.
+_VN_UPPER = 'AÀÁẢÃẠĂẮẰẲẴẶÂẤẦẨẪẬBCDĐEÈÉẺẼẸÊẾỀỂỄỆFGHIÌÍỈĨỊJKLMNOÒÓỎÕỌÔỐỒỔỖỘƠỚỜỞỠỢPQRSTUÙÚỦŨỤƯỨỪỬỮỰVWXYỲÝỶỸỴZ'
+
+
+def normalize_missing_article_delimiter(text: str) -> str:
+    """
+    Chuẩn hoá tiêu đề Điều bị thiếu dấu '.'/':' ngay sau số điều.
+
+    Dữ liệu crawl đôi khi ra:
+        Điều 1 Sửa đổi, bổ sung một số điều ...
+        ...có lợi nhất."Điều 2
+        1. Luật này có hiệu lực ...
+
+    Khi thiếu dấu '.'/':' ngay sau số điều, split_into_chunks không nhận diện
+    được tiêu đề Điều nên cả văn bản bị gộp thành 1 chunk khổng lồ, gây lỗi
+    over-token và bị cắt sai giữa nội dung.
+
+    Hàm này chèn dấu '.' sau số điều cho các tiêu đề Điều thực sự, đồng thời
+    tránh nhầm với trích dẫn kiểu:
+        "... Điều 13 được sửa đổi ...", "Điều 53 của Luật nhà ở",
+        "Điều 24 và khoản 2 ..."
+    (các trích dẫn này luôn có CHỮ THƯỜNG theo ngay sau số điều).
+
+    Chỉ coi là tiêu đề Điều (và chèn dấu '.') khi "Điều N" nằm đầu dòng và:
+      - theo sau là một CHỮ CÁI IN HOA tiếng Việt (bắt đầu tiêu đề), hoặc
+      - đứng riêng ở cuối dòng/kết chuỗi.
+    """
+    if not text:
+        return text
+
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
+
+    up = _VN_UPPER
+
+    # 1) Tách "Điều N" bị dính ngay sau dấu ngoặc kép ra dòng riêng, nhưng CHỈ
+    #    khi nó trông như một tiêu đề Điều (theo sau là chữ IN HOA hoặc cuối
+    #    dòng). Ví dụ: ...có lợi nhất."Điều 2  ->  ...có lợi nhất."\nĐiều 2
+    #    Không đụng tới trích dẫn "...]" + "Điều 13 được sửa đổi" (chữ thường).
+    text = re.sub(
+        r'(?<=[”"])[ \t]*(Điều\s+\d+\w*)(?=[ \t]*(?:$|\n|[' + up + r']))',
+        r'\n\1',
+        text,
+        flags=re.UNICODE
+    )
+
+    # 2) Chèn dấu '.' sau số điều nếu tiêu đề Điều đầu dòng thiếu dấu '.'/':'.
+    #    2a) đầu dòng, "Điều N" + khoảng trắng + CHỮ IN HOA -> "Điều N. Chữ..."
+    text = re.sub(
+        r'(?m)^([ \t]*Điều\s+\d+\w*)([ \t]+(?=[' + up + r']))',
+        r'\1.\2',
+        text,
+        flags=re.UNICODE
+    )
+    #    2b) đầu dòng, "Điều N" đứng riêng (cuối dòng) -> "Điều N."
+    text = re.sub(
+        r'(?m)^([ \t]*Điều\s+\d+\w*)([ \t]*)$',
+        r'\1.\2',
+        text,
+        flags=re.UNICODE
+    )
+
+    return text
+
 def extract_title(text: str, filename: str) -> str:
     for line in text.splitlines():
         s = line.strip()
@@ -166,6 +230,7 @@ def split_into_chunks(text: str) -> List[Chunk]:
     text = normalize_appendix_breaks(text)
     text = normalize_chapter_breaks(text)
     text = normalize_stuck_article_breaks(text)
+    text = normalize_missing_article_delimiter(text)
     matches = []
 
     dieu_re = re.compile(r'^\s*Điều\s+(\d+\w*)\s*[.:]', re.IGNORECASE | re.UNICODE | re.MULTILINE)

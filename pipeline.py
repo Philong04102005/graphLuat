@@ -727,6 +727,42 @@ def render_math_node(node, base_url: str = None) -> str:
         return f"^{{{inner}}}" if inner else ""
     return inner
 
+# Anchor href của footnote do Word/TVPL xuất ra:
+#   - marker trong thân bài:       href="#_ftn<N>"     (vd: <a href="#_ftn9" title="">9</a>)
+#   - back-link ở phần định nghĩa:  href="#_ftnref<N>"  (nằm dưới "XÁC THỰC VĂN BẢN HỢP NHẤT")
+# Mặc định render_dom_node bỏ thẻ <a> và chỉ giữ text "9", làm mất cấu trúc footnote
+# (vd biến thành "3.7", "10.8"). Ta chuẩn hoá cả hai loại anchor về dạng [N] để
+# format_hopnhat.py resolve được.
+_FOOTNOTE_REF_RE = re.compile(r'^#_ftn(\d+)\b')      # marker trong thân bài
+_FOOTNOTE_DEF_RE = re.compile(r'^#_ftnref(\d+)\b')   # định nghĩa cuối văn bản
+
+
+def render_footnote_anchor(node):
+    """
+    Trả về marker footnote dạng [N] cho thẻ <a> footnote, hoặc None nếu không phải footnote.
+
+    - Marker trong thân bài (#_ftn<N>)      -> "[N]"
+    - Định nghĩa cuối văn bản (#_ftnref<N>)  -> "\n[N] "  (ép xuống dòng để [N] nằm ở
+      đầu dòng, đúng định dạng mà resolve_footnotes mong đợi cho dòng định nghĩa)
+
+    Số footnote luôn lấy từ href (không phụ thuộc text/sup bên trong) nên bền vững
+    kể cả khi số được bọc trong <sup> hoặc bị dính vào số khoản.
+    """
+    href = (node.get('href', '') or '').strip()
+    if not href:
+        return None
+
+    def_match = _FOOTNOTE_DEF_RE.match(href)
+    if def_match:
+        return f"\n[{def_match.group(1)}] "
+
+    ref_match = _FOOTNOTE_REF_RE.match(href)
+    if ref_match:
+        return f"[{ref_match.group(1)}]"
+
+    return None
+
+
 def render_dom_node(node, base_url: str = None) -> str:
     """Render content DOM to text while preserving images and formula structure."""
     if isinstance(node, NavigableString):
@@ -744,6 +780,10 @@ def render_dom_node(node, base_url: str = None) -> str:
         return f"![]({img_url})" if img_url else ""
     if name in {"sub", "sup"}:
         return render_math_node(node, base_url)
+    if name == "a":
+        footnote_marker = render_footnote_anchor(node)
+        if footnote_marker is not None:
+            return footnote_marker
 
     text = render_dom_children(node, base_url)
     if name in {"p", "div", "section", "article", "blockquote", "center", "li", "tr", "td", "th", "h1", "h2", "h3", "h4", "h5", "h6"}:

@@ -1,15 +1,18 @@
 {
   "completed_urls": [
-    "https://thuvienphapluat.vn/van-ban/Thue-Phi-Le-Phi/Thong-tu-40-2021-TT-BTC-huong-dan-thue-gia-tri-gia-tang-thue-thu-nhap-ca-nhan-477635.aspx"
+    "https://thuvienphapluat.vn/van-ban/Bao-hiem/Van-ban-hop-nhat-47-VBHN-VPQH-2023-Luat-Bao-hiem-y-te-603826.aspx",
+    "https://thuvienphapluat.vn/van-ban/Bao-hiem/Van-ban-hop-nhat-10-VBHN-VPQH-Luat-bao-hiem-y-te-2016-303124.aspx",
+    "https://thuvienphapluat.vn/van-ban/Bao-hiem/Van-ban-hop-nhat-46-VBHN-VPQH-2018-Luat-Bao-hiem-y-te-410353.aspx",
+    "https://thuvienphapluat.vn/van-ban/Bao-hiem/Van-ban-hop-nhat-28-VBHN-VPQH-2020-Luat-Bao-hiem-y-te-468939.aspx"
   ],
-  "timestamp": "2026-05-28T21:23:16.307555",
+  "timestamp": "2026-07-09T16:08:36.129931",
   "stats": {
-    "total": 1,
-    "completed": 1,
+    "total": 4,
+    "completed": 4,
     "failed": 0,
     "skipped": 0,
-    "start_time": 1779977872.5693607,
-    "end_time": 1779978196.3075554
+    "start_time": 1783588020.7086208,
+    "end_time": 1783588116.1278446
   },
   "output_dir": "crawl"
 }
