@@ -225,8 +225,46 @@ def merge_chapter_with_next_article(chunks: List[Chunk], title: str) -> List[Chu
     return merged
 
 
+def merge_quoted_block_lines(text: str) -> str:
+    """
+    Gộp các dòng nằm trong CÙNG một cặp ngoặc kép thành một dòng.
+
+    Khi một dòng còn để MỞ ngoặc kép chưa đóng (đoạn trích dẫn nguyên văn điều luật),
+    các dòng tiếp theo được nối vào cùng dòng đó cho đến khi ngoặc kép đóng lại — nhờ
+    vậy cả khối trong cùng một cặp ngoặc kép đi chung với nhau, không bị cắt giữa chừng.
+    """
+    if not text:
+        return text
+
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
+    lines = text.split('\n')
+    out = []
+    buf = None
+
+    for line in lines:
+        if buf is None:
+            buf = line
+        else:
+            # buf đang ở trong ngoặc kép mở -> nối tiếp dòng này vào cùng dòng
+            joiner = ' ' if (buf and not buf.endswith(' ') and line) else ''
+            buf = buf + joiner + line
+
+        # Còn mở ngoặc kép thì tiếp tục gom dòng kế tiếp
+        if _is_inside_quote(buf, len(buf)):
+            continue
+
+        out.append(buf)
+        buf = None
+
+    if buf is not None:
+        out.append(buf)
+
+    return '\n'.join(out)
+
+
 def split_into_chunks(text: str) -> List[Chunk]:
     text = text.replace('\r\n', '\n').replace('\r', '\n')
+    text = merge_quoted_block_lines(text)
     text = normalize_appendix_breaks(text)
     text = normalize_chapter_breaks(text)
     text = normalize_stuck_article_breaks(text)
@@ -401,7 +439,7 @@ def format_article_annotation_block(content: str) -> str:
 
     pattern = re.compile(
         r'^(?P<header>\s*Điều\s+\d+\w*\s*[.:]\s*[^\n\[]+?)\s*'
-        r'\[(?P<note>.*?)\]\s*'
+        r'\[(?P<note>.*?)\](?!\()\s*'   # (?!\() : không nuốt link markdown [text](url)
         r'(?P<body>.+)$',
         flags=re.IGNORECASE | re.UNICODE | re.DOTALL
     )

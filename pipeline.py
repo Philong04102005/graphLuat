@@ -161,7 +161,11 @@ def extract_form_template_ids(content_div, base_url: str = None) -> list:
         bookmark_id = id_match.group(2) if id_match else ''
         template_text = normalize_template_text(element.get_text(' ', strip=True))
 
-        if should_skip_template_text(template_text):
+        # Chỉ bỏ qua "Phụ lục ..." khi KHÔNG phải bookmark biểu mẫu thật.
+        # Bookmark có đủ LawID + Bookmark_ID (từ LS_Tip_Type_Bookmark_bm) chắc chắn là
+        # mẫu tải được — nhiều văn bản (vd Thông tư liên tịch 41/2014) đặt tên mẫu ngay
+        # là "Phụ lục 01..04", nếu lọc theo tên sẽ mất sạch biểu mẫu.
+        if should_skip_template_text(template_text) and not (law_id and bookmark_id):
             continue
 
         template_key = (template_text, law_id, bookmark_id)
@@ -324,6 +328,75 @@ def infer_form_template_url(template_text: str, law_id: str, element=None) -> st
     filename = f"Mẫu số {form_number:02d}.pl{appendix_number}.doc"
     return base_url + quote(filename, safe="")
 
+def fetch_form_template_url_by_click(page, law_id: str, bookmark_id: str, element=None, wait_ms: int = 3000) -> str:
+    """
+    Cách bám sát thao tác tay: THỰC SỰ click vào thẻ biểu mẫu để trang tự render link
+    tải (href) lên chính thẻ đó, rồi đọc URL ra.
+
+    TVPL không nhúng link DocForms vào HTML tĩnh — chỉ khi click, hàm JS onclick mới gọi
+    về server và gắn href tải vào thẻ. Hàm này định vị đúng thẻ (theo name, hoặc theo
+    onclick chứa LawID+Bookmark_ID), click, chờ href xuất hiện rồi trả về URL.
+    Parse URL tái dùng extract_download_url_from_ajax_response.
+    """
+    if page is None:
+        return ""
+
+    name = element.get("name", "") if element else ""
+
+    try:
+        found_href = page.evaluate(
+            """async ({ name, lawId, bookmarkId, waitMs }) => {
+                let el = null;
+                if (name) {
+                    try {
+                        const sel = 'a[name="' + ((window.CSS && CSS.escape) ? CSS.escape(name) : name) + '"]';
+                        el = document.querySelector(sel);
+                    } catch (e) {}
+                }
+                if (!el && lawId && bookmarkId) {
+                    el = [...document.querySelectorAll('a[onclick]')].find(a => {
+                        const oc = a.getAttribute('onclick') || '';
+                        return oc.indexOf(lawId) !== -1 && oc.indexOf(bookmarkId) !== -1;
+                    });
+                }
+                if (!el) return '';
+
+                // Sau khi click, TVPL render ra một NÚT TẢI riêng mang href thật (không gắn
+                // vào chính thẻ bookmark). Ưu tiên #btnDownloadTemp, sau đó là
+                // a[data-action="download"] có href trỏ DocForms/files.thuvienphapluat.vn.
+                const readBtn = () => {
+                    let btn = document.querySelector('#btnDownloadTemp[href]');
+                    if (!btn) {
+                        btn = [...document.querySelectorAll('a[data-action="download"][href]')]
+                            .find(a => /DocForms|files\\.thuvienphapluat\\.vn/i.test(a.getAttribute('href') || ''));
+                    }
+                    return btn ? (btn.getAttribute('href') || '') : '';
+                };
+
+                // Ghi lại href hiện có (có thể là của form trước) để chờ nó ĐỔI sau khi click.
+                const before = readBtn();
+                // Kích hoạt bám sát thao tác tay: cuộn tới, hover, CHẠY ĐÚNG code onclick
+                // của thẻ (thay vì đoán tên hàm), rồi click. Bọc try/catch từng bước.
+                try { el.scrollIntoView({ block: 'center' }); } catch (e) {}
+                try { el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })); } catch (e) {}
+                try { const oc = el.getAttribute('onclick'); if (oc) { (new Function(oc)).call(el); } } catch (e) {}
+                try { el.click(); } catch (e) {}
+
+                const t0 = Date.now();
+                while (Date.now() - t0 < waitMs) {
+                    await new Promise(r => setTimeout(r, 150));
+                    const cur = readBtn();
+                    if (cur && cur !== before) return cur;
+                }
+                return readBtn();
+            }""",
+            {"name": name, "lawId": law_id, "bookmarkId": bookmark_id, "waitMs": wait_ms},
+        )
+
+        return extract_download_url_from_ajax_response(found_href or "")
+    except Exception:
+        return ""
+
 def resolve_form_template_url(page, template_text: str, law_id: str, bookmark_id: str, element=None, retry_count: int = 0) -> str:
     """Resolve form URL from LoadBieuMau response, then direct HTML fallback."""
     direct_url = extract_direct_form_url(element)
@@ -334,6 +407,12 @@ def resolve_form_template_url(page, template_text: str, law_id: str, bookmark_id
         ajax_url = fetch_form_template_url(page, law_id, bookmark_id, template_text=template_text, retry_count=retry_count)
         if ajax_url:
             return ajax_url
+
+    # Bám sát thao tác tay: click vào thẻ để trang tự render href tải rồi đọc URL.
+    clicked_url = fetch_form_template_url_by_click(page, law_id, bookmark_id, element=element)
+    if clicked_url:
+        print(f"      ↪ Lấy URL qua click: {template_text} -> {clicked_url}")
+        return clicked_url
 
     inferred_url = infer_form_template_url(template_text, law_id, element=element)
     if inferred_url:
@@ -961,7 +1040,7 @@ def extract_content(html: str, url: str = None, page=None) -> tuple:
         if not line:
             continue
         line = normalize_formula_text(line)
-        
+
         is_new_paragraph = any(re.match(p, line) for p in new_paragraph_patterns)
         
         if is_new_paragraph:
@@ -1151,7 +1230,7 @@ def run_pipeline(url: str, cookie_file: str = "cookies.txt", doc_name: str = Non
     
     print("🌐 Đang crawl...")
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(headless=False)
         context = browser.new_context()
         
         if cookie_file and os.path.exists(cookie_file):

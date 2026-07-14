@@ -38,6 +38,7 @@ class BatchCrawler:
         self.delay_range = delay_range
         self.max_retries = max_retries
         self.output_dir = output_dir
+        self.forms_dir = "mau_don"  # nơi gom mọi file *_data_url.json (URL biểu mẫu)
 
         # Thread safety - initialize locks first
         self.stats_lock = threading.Lock()
@@ -186,6 +187,29 @@ class BatchCrawler:
 
         return "Văn bản"
 
+    def _relocate_data_url_json(self, txt_filename: str) -> None:
+        """
+        pipeline.py ghi thêm '{ten}_data_url.json' (URL biểu mẫu) CÙNG CHỖ với file .txt,
+        tức tại cwd = thư mục gốc. batch trước đây chỉ move .txt nên JSON bị bỏ lại ở gốc.
+        Hàm này move nốt JSON vào folder 'mau_don/' (nơi gom mọi URL biểu mẫu).
+        """
+        if not txt_filename or not txt_filename.endswith('.txt'):
+            return
+        json_name = txt_filename[:-4] + '_data_url.json'
+        src = os.path.join(os.getcwd(), json_name)
+        forms_dir = os.path.join(os.getcwd(), self.forms_dir)
+        os.makedirs(forms_dir, exist_ok=True)
+        dst = os.path.join(forms_dir, json_name)
+        if os.path.exists(src):
+            try:
+                import shutil
+                shutil.move(src, dst)
+                with self.print_lock:
+                    print(f"   [{threading.current_thread().name}] 🔗 Đã lưu URL biểu mẫu vào {self.forms_dir}/: {json_name}")
+            except Exception as e:
+                with self.print_lock:
+                    print(f"   [{threading.current_thread().name}] ⚠️  Không move được JSON biểu mẫu: {e}")
+
     def run_pipeline_subprocess(self, url: str, doc_name: str, retry_count: int = 0) -> Tuple[bool, str]:
         """Run pipeline.py as subprocess for a single URL"""
         try:
@@ -241,12 +265,14 @@ class BatchCrawler:
                             with self.print_lock:
                                 print(f"   [{threading.current_thread().name}] ✅ Đã lưu: {filename}")
                             print(f"   [{threading.current_thread().name}] 📁 Đã chuyển đến: {self.output_dir}")
+                            self._relocate_data_url_json(filename)
                             return True, filename
                         else:
                             # File might already be in output directory
                             if os.path.exists(dest_path):
                                 with self.print_lock:
                                     print(f"   [{threading.current_thread().name}] ✅ Đã lưu: {filename}")
+                                self._relocate_data_url_json(filename)
                                 return True, filename
                             else:
                                 with self.print_lock:
@@ -272,6 +298,7 @@ class BatchCrawler:
                             with self.print_lock:
                                 print(f"   [{threading.current_thread().name}] ✅ Đã lưu: {expected_filename}")
                                 print(f"   [{threading.current_thread().name}] 📁 Đã chuyển đến: {self.output_dir}")
+                            self._relocate_data_url_json(expected_filename)
                             return True, expected_filename
                         except Exception as move_error:
                             with self.print_lock:
@@ -280,6 +307,7 @@ class BatchCrawler:
                     elif os.path.exists(dest_path):
                         with self.print_lock:
                             print(f"   [{threading.current_thread().name}] ✅ Đã lưu: {expected_filename}")
+                        self._relocate_data_url_json(expected_filename)
                         return True, expected_filename
                     else:
                         with self.print_lock:

@@ -24,6 +24,10 @@ def resolve_footnotes(text: str) -> str:
     Khi [n] xuất hiện ở cuối dòng (chapter heading), các dòng tiếp theo trong thân văn bản
     (các điều, khoản) cũng được gộp vào cùng dòng đó cho đến khi gặp watermark hoặc metadata.
     """
+    # Chuẩn hoá footnote bị bọc superscript kiểu ^{54[54]} (do <sup> lúc crawl bao quanh
+    # số + marker) về dạng [54]. Cũng nhận các biến thể ^{[54]}, ^{ 54 [ 54 ] }.
+    text = re.sub(r'\^\{\s*\d*\s*\[\s*(\d+)\s*\]\s*\}', r'[\1]', text)
+
     lines = text.splitlines()
     n = len(lines)
 
@@ -42,9 +46,17 @@ def resolve_footnotes(text: str) -> str:
         if len(positions) < 2:
             continue
 
-        def_idx = positions[1]
-        line = lines[def_idx]
-        m = re.match(rf'^\s*\[\s*{num}\s*\]\s*(.*)$', line)
+        # Dòng ĐỊNH NGHĨA footnote là dòng BẮT ĐẦU bằng [num] (thường ở cuối văn bản,
+        # dưới "XÁC THỰC"). Không giả định là positions[1]: marker [num] của chương có
+        # thể lặp lại ở breadcrumb của NHIỀU Điều nên positions[1] có thể là một breadcrumb
+        # chứ không phải dòng định nghĩa. Lấy dòng cuối cùng bắt đầu bằng [num].
+        def_idx = None
+        for pos in positions:
+            if re.match(rf'^\s*\[\s*{num}\s*\]\s*', lines[pos]):
+                def_idx = pos
+        if def_idx is None:
+            continue
+        m = re.match(rf'^\s*\[\s*{num}\s*\]\s*(.*)$', lines[def_idx])
         if not m:
             continue
 

@@ -113,22 +113,76 @@ def merge_chapter_with_next_article(chunks: List[Chunk], title: str) -> List[Chu
     return merged
 
 
+def _is_inside_quote(text: str, pos: int) -> bool:
+    """
+    Kiểm tra vị trí pos có đang nằm TRONG một đoạn trích dẫn (ngoặc kép) hay không,
+    bằng cách đếm độ sâu ngoặc kép tính từ đầu văn bản tới pos.
+
+    Dùng để bỏ qua các "Điều N"/"CHƯƠNG ..." nằm trong trích dẫn (ví dụ văn bản
+    sửa đổi trích lại nguyên văn điều luật) — chúng là nội dung, không phải tiêu đề,
+    nên không được tách thành chunk riêng.
+    """
+    quote_depth = 0
+    for ch in text[:pos]:
+        if ch == '“':
+            quote_depth += 1
+        elif ch == '”':
+            quote_depth = max(0, quote_depth - 1)
+        elif ch == '"':
+            quote_depth = max(0, quote_depth - 1) if quote_depth else 1
+    return quote_depth > 0
+
+
 def split_into_chunks(text: str) -> List[Chunk]:
     text = text.replace('\r\n', '\n').replace('\r', '\n')
     text = normalize_appendix_breaks(text)
     text = normalize_chapter_breaks(text)
     matches = []
 
+    # TẦNG 1: nhận diện Điều theo dạng chuẩn "Điều N." / "Điều N:" (có dấu . hoặc :).
+    # Bỏ qua "Điều N" nằm trong ngoặc kép (trích dẫn) — đó là nội dung, không phải tiêu đề.
     dieu_re = re.compile(r'^\s*Điều\s+(\d+\w*)\s*[.:]', re.IGNORECASE | re.UNICODE | re.MULTILINE)
-    for m in dieu_re.finditer(text):
-        matches.append((m.start(), 'article'))
+    article_matches = [
+        (m.start(), 'article') for m in dieu_re.finditer(text)
+        if not _is_inside_quote(text, m.start())
+    ]
+
+    # TẦNG 2 (fallback): CHỈ khi cả bài KHÔNG có "Điều N." nào (có dấu) thì mới xét dạng
+    # "Điều N" thiếu dấu — chỉ cần "Điều + số" ở đầu dòng (theo sau là khoảng trắng/cuối
+    # dòng). Không đòi chữ IN HOA vì tiêu đề Điều không nhất thiết bắt đầu bằng chữ hoa.
+    # Gate tầng 1 đã bảo đảm bài bình thường (có dấu) không đụng tới nhánh này.
+    if not article_matches:
+        dieu_nodot_re = re.compile(
+            r'^\s*Điều\s+\d+\w*\b',
+            re.IGNORECASE | re.UNICODE | re.MULTILINE
+        )
+        article_matches = [
+            (m.start(), 'article') for m in dieu_nodot_re.finditer(text)
+            if not _is_inside_quote(text, m.start())
+        ]
+
+    matches.extend(article_matches)
     chapter_re = re.compile(
         r'^\s*CHƯƠNG\s+(?:[IVXLCDM]+|\d+)\b[^\n]*',
         re.MULTILINE | re.UNICODE | re.IGNORECASE
     )
 
     for m in chapter_re.finditer(text):
+        # Bỏ qua CHƯƠNG nằm trong ngoặc kép (trích dẫn).
+        if _is_inside_quote(text, m.start()):
+            continue
         matches.append((m.start(), 'chapter'))
+
+    # Mục (tiểu mục): "Mục N" / "MỤC N" đầu dòng (số hoặc số La Mã) — cũng là ranh giới
+    # để mỗi Điều mang breadcrumb Mục hiện hành. Không dùng IGNORECASE để tránh bắt nhầm
+    # tham chiếu chữ thường "mục 2 ..."; "MỤC LỤC" không khớp vì "LỤC" không phải số.
+    muc_re = re.compile(r'^\s*(?:Mục|MỤC)\s+(?:\d+|[IVXLCDM]+)\b[^\n]*', re.MULTILINE | re.UNICODE)
+    for m in muc_re.finditer(text):
+        # Bỏ qua Mục nằm trong ngoặc kép (trích dẫn).
+        if _is_inside_quote(text, m.start()):
+            continue
+        matches.append((m.start(), 'section'))
+
     phu_luc_re = re.compile(r'^PHỤ LỤC\b', re.MULTILINE | re.UNICODE)
     for m in phu_luc_re.finditer(text):
         matches.append((m.start(), 'appendix'))
@@ -191,7 +245,7 @@ def format_article_annotation_block(content: str) -> str:
 
     pattern = re.compile(
         r'^(?P<header>\s*Điều\s+\d+\w*\s*[.:]\s*[^\n\[]+?)\s*'
-        r'\[(?P<note>.*?)\]\s*'
+        r'\[(?P<note>.*?)\](?!\()\s*'   # (?!\() : không nuốt link markdown [text](url)
         r'(?P<body>.+)$',
         flags=re.IGNORECASE | re.UNICODE | re.DOTALL
     )
@@ -374,7 +428,8 @@ def format_file(src_path: Path, out_dir: Path) -> Tuple[Path, int, bool]:
             cleaned_chunks.append((kind, c_cleaned))
 
     chunks = cleaned_chunks
-    chunks = merge_chapter_with_next_article(chunks, title)
+    # Chương KHÔNG còn là chunk riêng: tiêu đề chương được ghép vào tiền tố của
+    # mọi Điều thuộc chương đó (xử lý trong vòng ghi bên dưới qua current_chapter).
     out_dir.mkdir(parents=True, exist_ok=True)
     master_name = src_path.stem + '.txt'
     master_path = out_dir / master_name
@@ -383,12 +438,52 @@ def format_file(src_path: Path, out_dir: Path) -> Tuple[Path, int, bool]:
     total_subchunks = 0
     has_over_token = False
 
+    current_chapter = ''  # tiêu đề chương hiện hành để ghép vào tiền tố mỗi Điều
+    current_muc = ''      # tiêu đề Mục hiện hành (reset mỗi khi sang chương mới)
+
     with master_path.open('w', encoding='utf-8') as mf:
         for kind, chunk in chunks:
+            # Chương: không ghi thành chunk riêng, chỉ lưu tiêu đề để ghép vào
+            # tiền tố các Điều thuộc chương này.
+            if kind == 'chapter':
+                # Giữ nguyên footnote/ghi chú [ ... ] dính trên chương để nó "đi theo"
+                # breadcrumb của mỗi Điều; chỉ gộp lại khi note bị lặp 2 lần quanh tên chương.
+                heading = fix_chapter_heading_duplicate_note(chunk.strip())
+                heading = re.sub(r'\s+', ' ', heading).strip()
+                # Nếu có "Mục N ..." bị DÍNH vào cuối tiêu đề chương (nguồn crawl ghép cùng
+                # dòng) thì tách ra: phần trước là tên chương, phần "Mục N ..." trở thành Mục
+                # hiện hành. Nhờ vậy khi sang Mục mới, Mục cũ được THAY chứ không kẹt lại
+                # trong breadcrumb chương. ("MỨC" khác "MỤC" nên "MỨC PHẠT" không bị dính.)
+                msec = re.search(r'(?:Mục|MỤC)\s+(?:\d+|[IVXLCDM]+)\b.*$', heading)
+                if msec:
+                    current_muc = msec.group(0).strip()
+                    heading = heading[:msec.start()].strip()
+                else:
+                    current_muc = ''  # sang chương mới -> quên Mục cũ
+                if heading:
+                    current_chapter = heading
+                continue
+
+            # Mục: cũng không ghi thành chunk riêng, chỉ lưu tiêu đề (giữ nguyên
+            # footnote/ghi chú) để ghép vào breadcrumb các Điều thuộc Mục này.
+            if kind == 'section':
+                heading = re.sub(r'\s+', ' ', chunk.strip()).strip()
+                if heading:
+                    current_muc = heading
+                continue
+
             if kind in {'appendix', 'toc'}:
                 mf.write(title.rstrip('.') + '. ' + chunk.strip() + '\n\n')
                 total_subchunks += 1
                 continue
+
+            # Tiền tố: "<tên văn bản>. [<chương>. ][<Mục>. ]" — chỉ Điều mới kèm chương/Mục.
+            prefix = title.rstrip('.') + '. '
+            if kind == 'article':
+                if current_chapter:
+                    prefix += current_chapter.rstrip('.') + '. '
+                if current_muc:
+                    prefix += current_muc.rstrip('.') + '. '
 
             subchunks = _split_by_token_limit(chunk, encoder, max_tokens=15000)
             if len(subchunks) > 1:
@@ -413,10 +508,10 @@ def format_file(src_path: Path, out_dir: Path) -> Tuple[Path, int, bool]:
                 # Fix lỗi CHƯƠNG IX [note] TÊN CHƯƠNG [note]
                 sc_clean = fix_chapter_heading_duplicate_note(sc_clean)
                 # Format ghi chú nằm sau tiêu đề Điều
-                sc_clean = format_article_annotation_block(sc_clean)    
+                sc_clean = format_article_annotation_block(sc_clean)
                 # Apply the VB hết hiệu lực formatting fix
                 sc_clean = fix_vb_het_hieu_luc_formatting(sc_clean)
-                mf.write(title.rstrip('.') + '. ' + sc_clean.strip() + '\n\n')
+                mf.write(prefix + sc_clean.strip() + '\n\n')
                 total_subchunks += 1
 
     return master_path, total_subchunks, has_over_token
