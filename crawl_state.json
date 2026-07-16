@@ -1,15 +1,31 @@
 {
   "completed_urls": [
-    "https://thuvienphapluat.vn/van-ban/Bao-hiem/Thong-tu-lien-tich-41-2014-TTLT-BYT-BTC-huong-dan-thuc-hien-bao-hiem-y-te-261252.aspx"
+    "https://thuvienphapluat.vn/van-ban/Bao-hiem/Thong-tu-98-2025-TT-BQP-huong-dan-Nghi-dinh-188-2025-ND-CP-672601.aspx",
+    "https://thuvienphapluat.vn/van-ban/Bo-may-hanh-chinh/Quyet-dinh-190-QD-BTC-2019-ket-qua-he-thong-hoa-van-ban-quy-pham-phap-luat-Bo-Tai-Chinh-417005.aspx",
+    "https://thuvienphapluat.vn/van-ban/Bo-may-hanh-chinh/Quyet-dinh-1316-QD-BQP-2019-cong-bo-he-thong-hoa-van-ban-quy-pham-phap-luat-413687.aspx",
+    "https://thuvienphapluat.vn/van-ban/Bo-may-hanh-chinh/Quyet-dinh-410-QD-UBND-2024-cong-bo-ket-qua-he-thong-hoa-van-ban-phap-luat-Nghe-An-601477.aspx",
+    "https://thuvienphapluat.vn/van-ban/Bo-may-hanh-chinh/Quyet-dinh-6691-QD-BQP-2025-danh-muc-van-ban-quy-pham-phap-luat-het-hieu-luc-toan-bo-686823.aspx",
+    "https://thuvienphapluat.vn/van-ban/Bao-hiem/Quyet-dinh-25-QD-BHXH-nam-2014-Danh-muc-van-ban-het-hieu-luc-BHXH-Viet-Nam-218884.aspx",
+    "https://thuvienphapluat.vn/van-ban/Bo-may-hanh-chinh/Nghi-quyet-20-2023-NQ-HDND-bai-bo-Nghi-quyet-Nghe-An-603302.aspx",
+    "https://thuvienphapluat.vn/van-ban/Bao-hiem/Quyet-dinh-366-QD-BHXH-2026-quy-trinh-thu-bao-hiem-xa-hoi-bao-hiem-y-te-bao-hiem-that-nghiep-704900.aspx",
+    "https://thuvienphapluat.vn/van-ban/Bao-hiem/Quyet-dinh-832-QD-BHXH-nam-2013-xu-ly-ket-qua-ra-soat-van-ban-Bao-hiem-xa-hoi-205165.aspx",
+    "https://thuvienphapluat.vn/van-ban/Bo-may-hanh-chinh/Quyet-dinh-518-QD-UBND-2023-cong-bo-dich-vu-cong-truc-tuyen-toan-trinh-Hoa-Binh-604828.aspx",
+    "https://thuvienphapluat.vn/van-ban/Bo-may-hanh-chinh/Quyet-dinh-3611-QD-BYT-Danh-muc-van-ban-quy-pham-phap-luat-het-hieu-luc-toan-bo-hoac-mot-phan-290291.aspx",
+    "https://thuvienphapluat.vn/van-ban/Bo-may-hanh-chinh/Quyet-dinh-7757-QD-BYT-2018-Danh-muc-van-ban-quy-pham-phap-luat-het-hieu-luc-toan-bo-Bo-Y-te-404036.aspx",
+    "https://thuvienphapluat.vn/van-ban/Bo-may-hanh-chinh/Quyet-dinh-4666-QD-BYT-cong-bo-danh-muc-van-ban-quy-pham-phap-luat-het-hieu-luc-toan-bo-2016-320754.aspx",
+    "https://thuvienphapluat.vn/van-ban/Bo-may-hanh-chinh/Quyet-dinh-744-QD-BQP-2021-Danh-muc-van-ban-quy-pham-het-hieu-luc-thuoc-Bo-Quoc-phong-468246.aspx",
+    "https://thuvienphapluat.vn/van-ban/Vi-pham-hanh-chinh/Nghi-dinh-90-2026-ND-CP-xu-phat-vi-pham-hanh-chinh-trong-linh-vuc-y-te-639959.aspx",
+    "https://thuvienphapluat.vn/van-ban/Thue-Phi-Le-Phi/Quyet-dinh-2840-QD-BTC-danh-muc-van-ban-het-hieu-luc-toan-bo-theo-luat-phi-va-le-phi-2016-338183.aspx",
+    "https://thuvienphapluat.vn/van-ban/Bo-may-hanh-chinh/Quyet-dinh-134-QD-BYT-2026-Danh-muc-Van-ban-quy-pham-phap-luat-het-hieu-luc-toan-bo-2025-689708.aspx"
   ],
-  "timestamp": "2026-07-12T20:36:47.741537",
+  "timestamp": "2026-07-16T12:41:56.519173",
   "stats": {
-    "total": 1,
-    "completed": 1,
+    "total": 17,
+    "completed": 17,
     "failed": 0,
     "skipped": 0,
-    "start_time": 1783863284.9635835,
-    "end_time": 1783863407.740423
+    "start_time": 1784179492.8153872,
+    "end_time": 1784180516.5191731
   },
   "output_dir": "crawl"
 }

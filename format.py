@@ -313,6 +313,139 @@ def fix_chapter_heading_duplicate_note(content: str) -> str:
 
     return pattern.sub(repl, content)
 
+def _find_bracket_annotations(text: str):
+    """
+    Tìm mọi ghi chú dạng [ ... ] ở cấp NGOÀI CÙNG (bỏ qua link markdown [text](url)).
+    Xử lý được ngoặc vuông LỒNG nhau (vd nội dung viện dẫn có footnote [1]).
+    Trả về list (start, end, inner_text); end là vị trí NGAY SAU dấu ']' ngoài cùng.
+    """
+    spans = []
+    i, n = 0, len(text)
+    while i < n:
+        if text[i] == '[':
+            depth = 1
+            j = i + 1
+            while j < n and depth > 0:
+                if text[j] == '[':
+                    depth += 1
+                elif text[j] == ']':
+                    depth -= 1
+                j += 1
+            if depth != 0:
+                break  # ngoặc không cân -> dừng an toàn, không đụng gì
+            end = j
+            if end < n and text[end] == '(':
+                # [text](url) -> link markdown, KHÔNG phải ghi chú -> bỏ qua
+                i = end
+                continue
+            spans.append((i, end, text[i + 1:end - 1]))
+            i = end
+        else:
+            i += 1
+    return spans
+
+
+def merge_article_duplicate_annotations(content: str) -> str:
+    """
+    Gộp ghi chú viện dẫn/bổ sung bị LẶP trong 1 chunk Điều.
+
+    Chỉ gộp khi THỎA CẢ HAI điều kiện:
+      (1) Tiêu đề Điều có 1 ghi chú [A] (viện dẫn/bổ sung) — [A] nằm ngay sau
+          "Điều N. <tên điều>", trước bất kỳ khoản/nội dung nào.
+      (2) MỌI ghi chú [..] khác trong nội dung Điều đều GIỐNG HỆT [A]
+          (chuẩn hoá khoảng trắng), bất kể nằm ở đâu trong nội dung.
+      => giữ đúng 1 [A] trên tiêu đề Điều, xoá các bản lặp trong nội dung.
+
+    Chỉ cần có 1 ghi chú khác biệt (dù chỉ khác một chút), hoặc tiêu đề Điều
+    không mang ghi chú -> GIỮ NGUYÊN toàn bộ (không đụng gì).
+    """
+    if not content:
+        return content
+    # Chấp nhận cả "Điều N." lẫn "Điều N" KHÔNG dấu chấm (vd Hiến pháp: "Điều 2 [..]").
+    if not re.match(r'^\s*Điều\s+\d+\w*\b', content, flags=re.IGNORECASE | re.UNICODE):
+        return content
+
+    anns = _find_bracket_annotations(content)
+    if len(anns) < 2:
+        return content
+
+    def _norm(s: str) -> str:
+        return re.sub(r'\s+', ' ', s).strip()
+
+    # (1) ghi chú ĐẦU TIÊN phải nằm TRÊN TIÊU ĐỀ Điều: phần trước nó chỉ gồm
+    #     "Điều N. <tên điều>" — tên điều không được chứa khoản "N." hay ngoặc kép.
+    first_start = anns[0][0]
+    head = content[:first_start]
+    m = re.match(r'^\s*Điều\s+\d+\w*\s*[.:]?\s*', head, flags=re.IGNORECASE | re.UNICODE)
+    title_only = head[m.end():] if m else head
+    if re.search(r'\d+\s*[.)]\s', title_only) or any(q in title_only for q in ('"', '“', '”')):
+        return content
+
+    a_text = _norm(anns[0][2])
+    if not a_text:
+        return content
+
+    # (2) mọi ghi chú đều phải giống hệt A; chỉ cần 1 cái khác -> giữ nguyên tất
+    if any(_norm(s[2]) != a_text for s in anns):
+        return content
+
+    # Gộp: giữ ghi chú đầu (trên tiêu đề), xoá các ghi chú còn lại theo offset.
+    pieces = []
+    prev = 0
+    for s, e, _ in anns[1:]:
+        pieces.append(content[prev:s])
+        prev = e
+    pieces.append(content[prev:])
+    result = ''.join(pieces)
+
+    # Dọn khoảng trắng thừa do chỗ xoá để lại
+    result = re.sub(r'[ \t]{2,}', ' ', result)
+    result = re.sub(r' +\n', '\n', result)
+    result = re.sub(r'\n +', '\n', result)
+    return result
+
+
+_GHI_CHU_RE = re.compile(r'ghi\s*chú\s*:', re.IGNORECASE | re.UNICODE)
+# Chỉ xóa phụ lục BIỂU MẪU (có chữ "mẫu": "Phụ lục 02 mẫu", "mẫu đơn", "Mẫu số"...).
+# Phụ lục nội dung thường (KHÔNG có chữ "mẫu") thì GIỮ lại.
+_HAS_MAU_RE = re.compile(r'mẫu', re.IGNORECASE | re.UNICODE)
+
+
+def drop_appendix_chunks(chunks: List[Chunk]) -> List[Chunk]:
+    """
+    Xóa phần PHỤ LỤC BIỂU MẪU ở cuối văn bản — URL biểu mẫu đã lấy ở bước crawl.
+    CHỈ xóa phụ lục có chữ "mẫu" (biểu mẫu); phụ lục nội dung thường thì giữ nguyên.
+
+    Bắt đầu từ chunk 'appendix' ĐẦU TIÊN:
+      - Nếu KHÔNG tìm thấy dòng "Ghi chú:" nào ở phần dưới -> xóa HẾT tới cuối văn
+        bản, không dừng lại.
+      - Nếu CÓ "Ghi chú:" -> xóa qua HẾT ghi chú CUỐI CÙNG (kèm nội dung của nó,
+        tức tới hết chunk chứa ghi chú cuối) rồi ngưng; chỉ giữ lại nội dung thật
+        (nếu có) nằm SAU ghi chú cuối cùng.
+
+    Dùng ghi chú CUỐI (không phải ghi chú đầu) để không bỏ sót: các biểu mẫu thường
+    có nhiều dòng "Ghi chú:" nằm rải rác, và đôi khi có chunk 'article'/'table' giả
+    do nội dung biểu mẫu sinh ra ở giữa — mốc "ghi chú cuối" bảo đảm xóa sạch hết.
+    """
+    first = next((i for i, (k, c) in enumerate(chunks)
+                  if k == 'appendix' and _HAS_MAU_RE.search(c)), None)
+    if first is None:
+        return chunks
+
+    # Chunk CUỐI CÙNG (từ phụ lục trở đi) có chứa "Ghi chú:".
+    last_ghichu = None
+    for j in range(first, len(chunks)):
+        if _GHI_CHU_RE.search(chunks[j][1]):
+            last_ghichu = j
+
+    # Không có "Ghi chú:" -> xóa hết tới cuối văn bản.
+    if last_ghichu is None:
+        return chunks[:first]
+
+    # Có "Ghi chú:" -> xóa từ phụ lục qua hết chunk chứa ghi chú cuối rồi ngưng.
+    return chunks[:first] + chunks[last_ghichu + 1:]
+
+
 def _get_token_encoder():
     if tiktoken is None:
         return None
@@ -407,10 +540,101 @@ def fix_vb_het_hieu_luc_formatting(content: str) -> str:
         (VB hết hiệu lực: 01/02/2015) → (VB hết hiệu lực: 01/02/2015).
         (VB hết hiệu lực: 15/08/2025). → giữ nguyên
     """
-    # Pattern: tìm cụm "(VB hết hiệu lực: dd/mm/yyyy)" 
+    # Pattern: tìm cụm "(VB hết hiệu lực: dd/mm/yyyy)"
     # và đảm bảo không thêm chấm nếu đã có chấm ngay sau
     pattern = r'\(VB hết hiệu lực:\s*\d{1,2}/\d{1,2}/\d{4}\)(?!\.)'
     return re.sub(pattern, r'\g<0>.', content)
+
+
+# Mẫu khoản "N." (số + '.' + khoảng trắng) và tập ranh giới câu đứng ngay trước nó.
+_QUOTE_CLAUSE_RE = re.compile(r'\d+\.\s')
+_QUOTE_CLAUSE_BOUNDARY = set('.;:]')
+
+
+def break_numbered_items_in_quotes(text: str) -> str:
+    """
+    Xuống dòng cho các mục dạng "N." (1. , 2. , 10. ...) nằm BÊN TRONG ngoặc kép —
+    nhưng KHÔNG coi chúng là chunk (chỉ thêm ký tự xuống dòng để dễ đọc, việc tách
+    chunk vẫn bỏ qua nội dung trong ngoặc kép như cũ).
+
+    Hai trường hợp:
+      - "N." nằm giữa nội dung trong ngoặc kép (đứng sau dấu kết câu . ; : hoặc "]")
+        -> chèn xuống dòng NGAY TRƯỚC "N.".
+      - "N." nằm NGAY ĐẦU ngoặc kép (vd: abc. "1. Baby...") -> chèn xuống dòng
+        NGAY TRƯỚC dấu mở ngoặc kép, để cả đoạn trích dẫn xuống dòng.
+
+    Không tách khi "N." là số của "Điều N."/"khoản N." (đứng sau chữ cái) hay là năm/
+    ngày (vd "... năm 2016."), vì các số này KHÔNG đứng sau ranh giới câu. Cũng không
+    đụng tới nội dung bên trong ghi chú [ ... ].
+    """
+    if not text:
+        return text
+
+    out = []
+    quote_depth = 0
+    bracket_depth = 0
+    i, n = 0, len(text)
+
+    while i < n:
+        ch = text[i]
+
+        # Không tách khoản bên trong ghi chú [ ... ]
+        if ch == '[':
+            bracket_depth += 1
+            out.append(ch)
+            i += 1
+            continue
+        if ch == ']':
+            bracket_depth = max(0, bracket_depth - 1)
+            out.append(ch)
+            i += 1
+            continue
+
+        is_open = (ch == '“') or (ch == '"' and quote_depth == 0)
+        is_close = (ch == '”') or (ch == '"' and quote_depth > 0)
+
+        # Dấu MỞ ngoặc kép: nếu ngay sau (bỏ qua khoảng trắng) là "N." thì xuống dòng
+        # TRƯỚC dấu mở ngoặc kép.
+        if is_open:
+            j = i + 1
+            while j < n and text[j] in ' \t':
+                j += 1
+            if bracket_depth == 0 and _QUOTE_CLAUSE_RE.match(text, j):
+                while out and out[-1] in ' \t':
+                    out.pop()
+                if out and out[-1] != '\n':
+                    out.append('\n')
+            out.append(ch)
+            quote_depth += 1
+            i += 1
+            continue
+
+        if is_close:
+            out.append(ch)
+            quote_depth = max(0, quote_depth - 1)
+            i += 1
+            continue
+
+        # Đang TRONG ngoặc kép (ngoài ghi chú): gặp "N." khoản (đứng sau ranh giới câu)
+        # -> xuống dòng ngay trước nó.
+        if (quote_depth > 0 and bracket_depth == 0
+                and ch.isdigit() and _QUOTE_CLAUSE_RE.match(text, i)):
+            k = len(out) - 1
+            while k >= 0 and out[k] in ' \t':
+                k -= 1
+            prev = out[k] if k >= 0 else ''
+            if prev in _QUOTE_CLAUSE_BOUNDARY:
+                while out and out[-1] in ' \t':
+                    out.pop()
+                if out and out[-1] != '\n':
+                    out.append('\n')
+
+        out.append(ch)
+        i += 1
+
+    return ''.join(out)
+
+
 def format_file(src_path: Path, out_dir: Path) -> Tuple[Path, int, bool]:
     """Returns (master_path, total_subchunks, has_over_token)"""
     text = src_path.read_text(encoding='utf-8')
@@ -428,6 +652,8 @@ def format_file(src_path: Path, out_dir: Path) -> Tuple[Path, int, bool]:
             cleaned_chunks.append((kind, c_cleaned))
 
     chunks = cleaned_chunks
+    # Xóa phần PHỤ LỤC (biểu mẫu) ở cuối + phần "Ghi chú:" — URL biểu mẫu đã lấy khi crawl.
+    chunks = drop_appendix_chunks(chunks)
     # Chương KHÔNG còn là chunk riêng: tiêu đề chương được ghép vào tiền tố của
     # mọi Điều thuộc chương đó (xử lý trong vòng ghi bên dưới qua current_chapter).
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -473,7 +699,8 @@ def format_file(src_path: Path, out_dir: Path) -> Tuple[Path, int, bool]:
                 continue
 
             if kind in {'appendix', 'toc'}:
-                mf.write(title.rstrip('.') + '. ' + chunk.strip() + '\n\n')
+                sc_clean = break_numbered_items_in_quotes(chunk.strip())
+                mf.write(title.rstrip('.') + '. ' + sc_clean + '\n\n')
                 total_subchunks += 1
                 continue
 
@@ -507,10 +734,15 @@ def format_file(src_path: Path, out_dir: Path) -> Tuple[Path, int, bool]:
                 sc_clean = re.sub(r'\n\s*\n\s*(\|)', r'\n\1', sc)
                 # Fix lỗi CHƯƠNG IX [note] TÊN CHƯƠNG [note]
                 sc_clean = fix_chapter_heading_duplicate_note(sc_clean)
+                # Gộp ghi chú viện dẫn/bổ sung bị lặp: nếu tiêu đề Điều và TOÀN BỘ
+                # ghi chú trong nội dung đều giống hệt nhau thì giữ 1 cái trên tiêu đề.
+                sc_clean = merge_article_duplicate_annotations(sc_clean)
                 # Format ghi chú nằm sau tiêu đề Điều
                 sc_clean = format_article_annotation_block(sc_clean)
                 # Apply the VB hết hiệu lực formatting fix
                 sc_clean = fix_vb_het_hieu_luc_formatting(sc_clean)
+                # Xuống dòng cho các mục "N." nằm trong ngoặc kép (không tạo chunk)
+                sc_clean = break_numbered_items_in_quotes(sc_clean)
                 mf.write(prefix + sc_clean.strip() + '\n\n')
                 total_subchunks += 1
 

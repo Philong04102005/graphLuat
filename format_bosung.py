@@ -507,6 +507,47 @@ def fix_chapter_heading_duplicate_note(content: str) -> str:
 
     return pattern.sub(repl, content)
 
+_GHI_CHU_RE = re.compile(r'ghi\s*chú\s*:', re.IGNORECASE | re.UNICODE)
+# Chỉ xóa phụ lục BIỂU MẪU (có chữ "mẫu": "Phụ lục 02 mẫu", "mẫu đơn", "Mẫu số"...).
+# Phụ lục nội dung thường (KHÔNG có chữ "mẫu") thì GIỮ lại.
+_HAS_MAU_RE = re.compile(r'mẫu', re.IGNORECASE | re.UNICODE)
+
+
+def drop_appendix_chunks(chunks: List[Chunk]) -> List[Chunk]:
+    """
+    Xóa phần PHỤ LỤC BIỂU MẪU ở cuối văn bản — URL biểu mẫu đã lấy ở bước crawl.
+    CHỈ xóa phụ lục có chữ "mẫu" (biểu mẫu); phụ lục nội dung thường thì giữ nguyên.
+
+    Bắt đầu từ chunk 'appendix' ĐẦU TIÊN:
+      - Nếu KHÔNG tìm thấy dòng "Ghi chú:" nào ở phần dưới -> xóa HẾT tới cuối văn
+        bản, không dừng lại.
+      - Nếu CÓ "Ghi chú:" -> xóa qua HẾT ghi chú CUỐI CÙNG (kèm nội dung của nó,
+        tức tới hết chunk chứa ghi chú cuối) rồi ngưng; chỉ giữ lại nội dung thật
+        (nếu có) nằm SAU ghi chú cuối cùng.
+
+    Dùng ghi chú CUỐI (không phải ghi chú đầu) để không bỏ sót: các biểu mẫu thường
+    có nhiều dòng "Ghi chú:" nằm rải rác, và đôi khi có chunk 'article'/'table' giả
+    do nội dung biểu mẫu sinh ra ở giữa — mốc "ghi chú cuối" bảo đảm xóa sạch hết.
+    """
+    first = next((i for i, (k, c) in enumerate(chunks)
+                  if k == 'appendix' and _HAS_MAU_RE.search(c)), None)
+    if first is None:
+        return chunks
+
+    # Chunk CUỐI CÙNG (từ phụ lục trở đi) có chứa "Ghi chú:".
+    last_ghichu = None
+    for j in range(first, len(chunks)):
+        if _GHI_CHU_RE.search(chunks[j][1]):
+            last_ghichu = j
+
+    # Không có "Ghi chú:" -> xóa hết tới cuối văn bản.
+    if last_ghichu is None:
+        return chunks[:first]
+
+    # Có "Ghi chú:" -> xóa từ phụ lục qua hết chunk chứa ghi chú cuối rồi ngưng.
+    return chunks[:first] + chunks[last_ghichu + 1:]
+
+
 def _get_token_encoder():
     if tiktoken is None:
         return None
@@ -601,10 +642,99 @@ def fix_vb_het_hieu_luc_formatting(content: str) -> str:
         (VB hết hiệu lực: 01/02/2015) → (VB hết hiệu lực: 01/02/2015).
         (VB hết hiệu lực: 15/08/2025). → giữ nguyên
     """
-    # Pattern: tìm cụm "(VB hết hiệu lực: dd/mm/yyyy)" 
+    # Pattern: tìm cụm "(VB hết hiệu lực: dd/mm/yyyy)"
     # và đảm bảo không thêm chấm nếu đã có chấm ngay sau
     pattern = r'\(VB hết hiệu lực:\s*\d{1,2}/\d{1,2}/\d{4}\)(?!\.)'
     return re.sub(pattern, r'\g<0>.', content)
+
+
+# Mẫu khoản "N." (số + '.' + khoảng trắng) và tập ranh giới câu đứng ngay trước nó.
+_QUOTE_CLAUSE_RE = re.compile(r'\d+\.\s')
+_QUOTE_CLAUSE_BOUNDARY = set('.;:]')
+
+
+def break_numbered_items_in_quotes(text: str) -> str:
+    """
+    Xuống dòng cho các mục dạng "N." (1. , 2. , 10. ...) nằm BÊN TRONG ngoặc kép —
+    nhưng KHÔNG coi chúng là chunk (chỉ thêm ký tự xuống dòng để dễ đọc, việc tách
+    chunk vẫn bỏ qua nội dung trong ngoặc kép như cũ).
+
+    Hai trường hợp:
+      - "N." nằm giữa nội dung trong ngoặc kép (đứng sau dấu kết câu . ; : hoặc "]")
+        -> chèn xuống dòng NGAY TRƯỚC "N.".
+      - "N." nằm NGAY ĐẦU ngoặc kép (vd: abc. "1. Baby...") -> chèn xuống dòng
+        NGAY TRƯỚC dấu mở ngoặc kép, để cả đoạn trích dẫn xuống dòng.
+
+    Không tách khi "N." là số của "Điều N."/"khoản N." (đứng sau chữ cái) hay là năm/
+    ngày (vd "... năm 2016."), vì các số này KHÔNG đứng sau ranh giới câu. Cũng không
+    đụng tới nội dung bên trong ghi chú [ ... ].
+    """
+    if not text:
+        return text
+
+    out = []
+    quote_depth = 0
+    bracket_depth = 0
+    i, n = 0, len(text)
+
+    while i < n:
+        ch = text[i]
+
+        # Không tách khoản bên trong ghi chú [ ... ]
+        if ch == '[':
+            bracket_depth += 1
+            out.append(ch)
+            i += 1
+            continue
+        if ch == ']':
+            bracket_depth = max(0, bracket_depth - 1)
+            out.append(ch)
+            i += 1
+            continue
+
+        is_open = (ch == '“') or (ch == '"' and quote_depth == 0)
+        is_close = (ch == '”') or (ch == '"' and quote_depth > 0)
+
+        # Dấu MỞ ngoặc kép: nếu ngay sau (bỏ qua khoảng trắng) là "N." thì xuống dòng
+        # TRƯỚC dấu mở ngoặc kép.
+        if is_open:
+            j = i + 1
+            while j < n and text[j] in ' \t':
+                j += 1
+            if bracket_depth == 0 and _QUOTE_CLAUSE_RE.match(text, j):
+                while out and out[-1] in ' \t':
+                    out.pop()
+                if out and out[-1] != '\n':
+                    out.append('\n')
+            out.append(ch)
+            quote_depth += 1
+            i += 1
+            continue
+
+        if is_close:
+            out.append(ch)
+            quote_depth = max(0, quote_depth - 1)
+            i += 1
+            continue
+
+        # Đang TRONG ngoặc kép (ngoài ghi chú): gặp "N." khoản (đứng sau ranh giới câu)
+        # -> xuống dòng ngay trước nó.
+        if (quote_depth > 0 and bracket_depth == 0
+                and ch.isdigit() and _QUOTE_CLAUSE_RE.match(text, i)):
+            k = len(out) - 1
+            while k >= 0 and out[k] in ' \t':
+                k -= 1
+            prev = out[k] if k >= 0 else ''
+            if prev in _QUOTE_CLAUSE_BOUNDARY:
+                while out and out[-1] in ' \t':
+                    out.pop()
+                if out and out[-1] != '\n':
+                    out.append('\n')
+
+        out.append(ch)
+        i += 1
+
+    return ''.join(out)
 def format_file(src_path: Path, out_dir: Path) -> Tuple[Path, int, bool]:
     """Returns (master_path, total_subchunks, has_over_token)"""
     text = src_path.read_text(encoding='utf-8')
@@ -625,6 +755,8 @@ def format_file(src_path: Path, out_dir: Path) -> Tuple[Path, int, bool]:
 
     chunks = cleaned_chunks
     chunks = merge_chapter_with_next_article(chunks, title)
+    # Xóa phần PHỤ LỤC (biểu mẫu) ở cuối + phần "Ghi chú:" — URL biểu mẫu đã lấy khi crawl.
+    chunks = drop_appendix_chunks(chunks)
     out_dir.mkdir(parents=True, exist_ok=True)
     master_name = src_path.stem + '.txt'
     master_path = out_dir / master_name
@@ -642,6 +774,8 @@ def format_file(src_path: Path, out_dir: Path) -> Tuple[Path, int, bool]:
                     sc_clean = fix_chapter_heading_duplicate_note(sc_clean)
 
                 sc_clean = fix_vb_het_hieu_luc_formatting(sc_clean)
+                # Xuống dòng cho các mục "N." nằm trong ngoặc kép (không tạo chunk)
+                sc_clean = break_numbered_items_in_quotes(sc_clean)
 
                 mf.write(title.rstrip('.') + '. ' + sc_clean + '\n\n')
                 total_subchunks += 1
@@ -680,6 +814,8 @@ def format_file(src_path: Path, out_dir: Path) -> Tuple[Path, int, bool]:
                     sc_clean = fix_chapter_heading_duplicate_note(sc_clean)
                     sc_clean = format_article_annotation_block(sc_clean)
                     sc_clean = fix_vb_het_hieu_luc_formatting(sc_clean)
+                    # Xuống dòng cho các mục "N." nằm trong ngoặc kép (không tạo chunk)
+                    sc_clean = break_numbered_items_in_quotes(sc_clean)
 
                     mf.write(title.rstrip('.') + '. ' + sc_clean.strip() + '\n\n')
                     total_subchunks += 1
