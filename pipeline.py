@@ -1054,6 +1054,12 @@ def extract_content(html: str, url: str = None, page=None) -> tuple:
                 if re.search(dieu_title_end_pattern, buffer):
                     result.append(buffer)
                     buffer = line
+                elif re.match(r'^\d+\.$', buffer):
+                    # Số khoản TRẦN "N." (vd "6.") bị DOM render tách khỏi phần chữ
+                    # của khoản (vd "Hình thức xử phạt bổ sung: ...") -> nối lại
+                    # thành "6. Hình thức xử phạt bổ sung: ..." thay vì flush "6."
+                    # thành một đoạn riêng (vì nó kết thúc bằng dấu chấm).
+                    buffer = buffer + " " + line
                 elif re.search(r'[.;?!]$', buffer):
                     result.append(buffer)
                     buffer = line

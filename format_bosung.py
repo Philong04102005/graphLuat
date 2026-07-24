@@ -350,13 +350,25 @@ def is_amending_document(text: str) -> bool:
 
 def _is_inside_quote(text: str, pos: int) -> bool:
     quote_depth = 0
-    for ch in text[:pos]:
+    i = 0
+    while i < pos:
+        ch = text[i]
         if ch == '“':
             quote_depth += 1
         elif ch == '”':
             quote_depth = max(0, quote_depth - 1)
+        elif ch in ('’', "'") and i + 1 < len(text) and text[i + 1] == ch:
+            # HAI dấu nháy đơn LIỀN NHAU (’’ hoặc '') nhìn như một ngoặc kép —
+            # là ngoặc ĐÓNG gõ nhầm từ nguồn TVPL (vd “...’’). Chỉ có tác dụng
+            # ĐÓNG khi đang trong ngoặc kép. Nháy đơn LẺ không có tác dụng gì
+            # (tránh đóng oan với dấu nháy hợp lệ trong nội dung).
+            if quote_depth:
+                quote_depth -= 1
+            i += 2
+            continue
         elif ch == '"':
             quote_depth = max(0, quote_depth - 1) if quote_depth else 1
+        i += 1
     return quote_depth > 0
 
 
@@ -787,11 +799,12 @@ def format_file(src_path: Path, out_dir: Path) -> Tuple[Path, int, bool]:
             else:
                 article_parts = [chunk]
 
-            for article_part in article_parts:
-                subchunks = _split_by_token_limit(article_part, encoder, max_tokens=15000)
+            # Ngân sách token = 15000 TRỪ đi phần tiền tố (tên văn bản) sẽ được ghi
+            # kèm mỗi chunk, để chunk GHI RA (gồm cả prefix) không vượt 15000 tokens.
+            prefix_budget = max(1000, 15000 - _count_tokens(title, encoder) - 2)
 
-                if len(subchunks) > 1:
-                    has_over_token = True
+            for article_part in article_parts:
+                subchunks = _split_by_token_limit(article_part, encoder, max_tokens=prefix_budget)
 
                 merged = []
                 for sc in subchunks:
@@ -808,7 +821,22 @@ def format_file(src_path: Path, out_dir: Path) -> Tuple[Path, int, bool]:
                     else:
                         merged.append(s)
 
+                # Bước gộp bảng/Điều ở trên có thể dán các mảnh về lại thành chunk
+                # vượt limit lần nữa -> tách lại lần cuối để bảo đảm mọi chunk ghi ra
+                # đều <= 15000 tokens. Chỉ flag over-token khi TÁCH XONG vẫn còn
+                # chunk vượt limit (tức 1 dòng đơn quá dài, không thể chia nhỏ hơn).
+                final_subchunks = []
                 for sc in merged:
+                    if _count_tokens(sc, encoder) > prefix_budget:
+                        final_subchunks.extend(_split_by_token_limit(sc, encoder, max_tokens=prefix_budget))
+                    else:
+                        final_subchunks.append(sc)
+
+                for sc in final_subchunks:
+                    if _count_tokens(sc, encoder) > prefix_budget:
+                        has_over_token = True
+
+                for sc in final_subchunks:
                     sc_clean = re.sub(r'\n\s*\n\s*(\|)', r'\n\1', sc)
 
                     sc_clean = fix_chapter_heading_duplicate_note(sc_clean)
