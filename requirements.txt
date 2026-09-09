@@ -1,10 +1,18 @@
 beautifulsoup4==4.14.3
+boto3==1.40.19
 certifi==2025.11.12
 charset-normalizer==3.4.4
+fastapi==0.115.0
 greenlet==3.2.4
 idna==3.11
 markdownify==1.2.2
-playwright==1.56.0
+openai==1.68.0
+pandas==2.3.1
+patchright==1.59.1
+Pillow==11.3.0
+pymupdf==1.26.4
+python-dotenv==1.1.1
+python-multipart==0.0.9
 pyee==13.0.0
 regex==2025.11.3
 requests==2.32.5
@@ -13,3 +21,4 @@ soupsieve==2.8
 tiktoken==0.12.0
 typing_extensions==4.15.0
 urllib3==2.5.0
+uvicorn==0.30.0

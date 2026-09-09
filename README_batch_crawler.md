@@ -47,10 +47,10 @@ Batch crawler này **KHÔNG** implement lại logic crawl mà **gọi trực ti�
 
 ```bash
 # Install dependencies (cần cho pipeline.py)
-pip install playwright beautifulsoup4
+pip install patchright beautifulsoup4
 
-# Install Playwright browsers
-playwright install chromium
+# Install Patchright browsers
+patchright install chromium
 
 # Hoặc dùng uv (recommended)
 pip install uv
@@ -95,7 +95,7 @@ Arguments:
 Options:
   -t, --threads N       Số thread concurrently (default: 4)
   -c, --cookies FILE    Cookie file (default: cookies.txt)
-  -d, --delay MIN MAX   Delay range giữa requests (default: 1.0 3.0)
+  -d, --delay MIN MAX   Delay range giữa requests (default: 5.0 8.0)
   -r, --retry N         Số lần retry cho mỗi URL (default: 3)
   --resume              Tiếp tục từ lần chạy trước
   --state FILE          File state cho resume (default: crawl_state.json)

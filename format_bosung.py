@@ -481,9 +481,15 @@ def fix_vb_het_hieu_luc_formatting(content: str) -> str:
     # và đảm bảo không thêm chấm nếu đã có chấm ngay sau
     pattern = r'\(VB hết hiệu lực:\s*\d{1,2}/\d{1,2}/\d{4}\)(?!\.)'
     return re.sub(pattern, r'\g<0>.', content)
+def remove_link_metadata_labels(text: str) -> str:
+    """Remove crawler link metadata while preserving other bracketed content."""
+    return re.sub(r'[ \t]*\[(?:JavaScript|ID):[^\]\r\n]*\]', '', text)
+
+
 def format_file(src_path: Path, out_dir: Path) -> Tuple[Path, int, bool]:
     """Returns (master_path, total_subchunks, has_over_token)"""
     text = src_path.read_text(encoding='utf-8')
+    text = remove_link_metadata_labels(text)
     is_amending = is_amending_document(text)
     source_title = extract_title(text, src_path.name)
     title = build_amending_title(source_title, text, is_amending)

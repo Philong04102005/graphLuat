@@ -19,7 +19,7 @@ import re
 from html import unescape
 import sys
 from bs4 import BeautifulSoup, NavigableString, Tag, Comment
-from playwright.sync_api import sync_playwright
+from patchright.sync_api import sync_playwright
 from table_converter import is_data_table, process_tables_in_content
 from urllib.parse import unquote, urljoin
 
@@ -225,11 +225,11 @@ def extract_direct_form_url(element) -> str:
     return ""
 
 FORM_REQUEST_CONCURRENCY = 4
-FORM_REQUEST_DELAY_RANGE = (0.0, 0.15)
-FORM_BATCH_PAUSE_RANGE = (0.15, 0.5)
+FORM_REQUEST_DELAY_RANGE = (0.3, 0.6)
+FORM_BATCH_PAUSE_RANGE = (0.6, 1.2)
 FORM_RATE_LIMIT_BACKOFF_BASE = 2.5
 FORM_RATE_LIMIT_COOLDOWN = 4.0
-FORM_SECOND_PASS_DELAY = 0.5
+FORM_SECOND_PASS_DELAY = 1.0
 
 FORM_AJAX_STATS = {
     "count": 0,
@@ -672,18 +672,23 @@ def extract_note_content(soup: BeautifulSoup, element) -> str:
     else:
         return ""
     
-    note_div = soup.find('div', id=note_id)
-    if note_div:
+    note_divs = soup.find_all('div', id=note_id)
+    for note_div in note_divs:
         note_text = note_div.get_text(separator=' ', strip=True)
-        if note_text:
-            parts = note_text.split('|~|')
-            if len(parts) >= 2:
-                main_content = parts[0].strip()
-                source_note = parts[1].strip() if len(parts) > 1 else ""
-                if source_note:
-                    return f"\n{main_content} [{source_note}]"
-                return f"\n{main_content}"
-        return f"\n{note_text}"
+        if not note_text:
+            continue
+        parts = note_text.split('|~|')
+        if len(parts) >= 2:
+            main_content = parts[0].strip()
+            source_note = parts[1].strip()
+            if not main_content and not source_note:
+                continue
+            result = f"{main_content} [{source_note}]" if source_note else main_content
+        else:
+            result = note_text
+        print(f"   Note OK: {element_id} -> {note_id} ({len(result)} chars, {len(note_divs)} matching divs)")
+        return f"\n{result}"
+    print(f"   Note WARNING: {element_id} -> {note_id}: {'empty content' if note_divs else 'div not found'}; keeping original text")
     return ""
 
 def normalize_image_url(src: str, base_url: str = None) -> str:
@@ -715,7 +720,11 @@ def render_math_node(node, base_url: str = None) -> str:
 def render_dom_node(node, base_url: str = None) -> str:
     """Render content DOM to text while preserving images and formula structure."""
     if isinstance(node, NavigableString):
-        return str(node)
+        # Only join a standalone clause number with its text in the same node.
+        # Preserve all other source whitespace to avoid changing paragraph rules.
+        if node.find_parent(["pre", "textarea"]):
+            return str(node)
+        return re.sub(r'^(\s*\d+\.)[ \t]*\r?\n[ \t]*(?=\S)', r'\1 ', str(node))
     if not isinstance(node, Tag):
         return ""
 
@@ -731,6 +740,18 @@ def render_dom_node(node, base_url: str = None) -> str:
         return render_math_node(node, base_url)
 
     text = render_dom_children(node, base_url)
+    if name == "a":
+        # Match the link metadata emitted by table_converter for table cells.
+        onclick = node.get("onclick", "")
+        anchor_name = node.get("name", "")
+        labels = []
+        if onclick:
+            match = re.search(r'(\w+)\s*\(', onclick)
+            labels.append(f"[JavaScript: {match.group(1)}]" if match else "[JavaScript link]")
+        if anchor_name:
+            labels.append(f"[ID: {anchor_name}]")
+        if labels:
+            text += " " + " ".join(labels)
     if name in {"p", "div", "section", "article", "blockquote", "center", "li", "tr", "td", "th", "h1", "h2", "h3", "h4", "h5", "h6"}:
         return text + "\n"
     return text
@@ -790,7 +811,7 @@ def process_element_with_hover(soup: BeautifulSoup, content_div) -> None:
     huongdan_elements = content_div.find_all('huongdan', id=re.compile(r'^span-note_'))
     for element in huongdan_elements:
         note_content = extract_note_content(soup, element)
-        if note_content:
+        if note_content.strip():
             element.string = note_content
 
 def extract_content(html: str, url: str = None, page=None) -> tuple:
@@ -870,7 +891,7 @@ def extract_content(html: str, url: str = None, page=None) -> tuple:
     new_paragraph_patterns = [
         r'^Mục\s+\d+',
         r'^Điều\s+\d+',
-        r'^\d+\.\s',
+        r'^\d+\.(?:\s|$)',
         r'^[a-zđ]\)\s',
         r'^-\s',
         r'^PHỤ LỤC',
@@ -914,10 +935,20 @@ def extract_content(html: str, url: str = None, page=None) -> tuple:
                 buffer = line
         else:
             if buffer:
-                if re.search(dieu_title_end_pattern, buffer):
+                # Metadata is diagnostic text, not sentence punctuation.
+                # Strip it only for boundary checks; preserve the actual output.
+                boundary_text = re.sub(
+                    r'\[(?:(?:JavaScript|ID):[^\]\r\n]*|JavaScript link)\]',
+                    '', buffer,
+                ).rstrip()
+                if re.fullmatch(r'\d+\.', boundary_text) and not line.startswith('<<<TABLE_'):
+                    # A standalone clause number is not a completed sentence.
+                    # Join after DOM rendering, including across separate inline tags.
+                    buffer = buffer + " " + line
+                elif re.search(dieu_title_end_pattern, boundary_text):
                     result.append(buffer)
                     buffer = line
-                elif re.search(r'[.;?!]$', buffer):
+                elif re.search(r'[.;?!]$', boundary_text):
                     result.append(buffer)
                     buffer = line
                 else:
@@ -1074,7 +1105,7 @@ def render_tooltips_fast(page, chunk_scroll=250, wait_ms=800):
 def window_inner_height(page):
     return page.evaluate("window.innerHeight")
 
-def run_pipeline(url: str, cookie_file: str = "cookies.txt", doc_name: str = None, output_dir: str = ".") -> str:
+def run_pipeline(url: str, cookie_file: str = "cookies.txt", doc_name: str = None, output_dir: str = None) -> str:
     """
     Chạy pipeline hoàn chỉnh.
     """
@@ -1093,7 +1124,7 @@ def run_pipeline(url: str, cookie_file: str = "cookies.txt", doc_name: str = Non
     
     print("🌐 Đang crawl...")
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(headless=False)
         context = browser.new_context()
         
         if cookie_file and os.path.exists(cookie_file):
@@ -1102,7 +1133,9 @@ def run_pipeline(url: str, cookie_file: str = "cookies.txt", doc_name: str = Non
             print(f"🍪 Đã load {len(cookies)} cookies từ {cookie_file}")
         
         page = context.new_page()
+
         page.goto(url, wait_until="domcontentloaded", timeout=60000)
+
         page.wait_for_timeout(1000)
         
         html = render_tooltips_fast(page)
@@ -1132,7 +1165,9 @@ def run_pipeline(url: str, cookie_file: str = "cookies.txt", doc_name: str = Non
     
     # Save form template URLs to JSON
     if form_template_urls:
-        data_url_file = os.path.join(output_dir, f"{safe_doc_name}_data_url.json") if output_dir else f"{safe_doc_name}_data_url.json"
+        template_output_dir = output_dir if output_dir is not None else "mau_don"
+        os.makedirs(template_output_dir or ".", exist_ok=True)
+        data_url_file = os.path.join(template_output_dir, f"{safe_doc_name}_data_url.json")
         save_form_template_urls(form_template_urls, data_url_file)
     
     print("=" * 60)
@@ -1155,7 +1190,7 @@ python pipeline.py "https://thuvienphapluat.vn/van-ban/..." --doc-name "Luật A
     parser.add_argument("url", help="URL của văn bản pháp luật trên thuvienphapluat.vn")
     parser.add_argument("-c", "--cookies", default="cookies.txt", help="File cookies (default: cookies.txt)")
     parser.add_argument("-n", "--doc-name", help="Tên văn bản (auto-detect nếu không cung cấp)")
-    parser.add_argument("-o", "--output-dir", default=".", help="Output directory (default: current directory)")
+    parser.add_argument("-o", "--output-dir", default=None, help="Output directory (default: TXT in current directory, form JSON in mau_don)")
     args = parser.parse_args()
     
     try:

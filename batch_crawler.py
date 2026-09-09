@@ -31,7 +31,7 @@ class BatchCrawler:
     """Multi-threaded batch crawler that calls pipeline.py via subprocess"""
 
     def __init__(self, max_workers: int = 4, cookie_file: str = "cookies.txt",
-                 delay_range: Tuple[float, float] = (1.0, 3.0), max_retries: int = 3,
+                 delay_range: Tuple[float, float] = (5.0, 8.0), max_retries: int = 3,
                  output_dir: str = "crawl"):
         self.max_workers = max_workers
         self.cookie_file = cookie_file
@@ -207,6 +207,8 @@ class BatchCrawler:
                 cmd.append("--doc-name")
                 cmd.append(doc_name)
 
+            # Pipeline emits JavaScript/ID labels inside and outside tables.
+            # Preserve its TXT output unchanged when moving it below.
             # Run subprocess from original directory
             result = subprocess.run(
                 cmd,
@@ -215,7 +217,7 @@ class BatchCrawler:
                 text=True,
                 encoding='utf-8',          # 👈 Thêm dòng này
                 errors='replace',          # 👈 Thay ký tự lỗi bằng 
-                timeout=300
+                timeout=900
             )
 
             if result.returncode == 0:
@@ -301,7 +303,7 @@ class BatchCrawler:
 
         except Exception as e:
             if retry_count < self.max_retries:
-                delay = (retry_count + 1) * 2  # Exponential backoff
+                delay = (retry_count + 1) * 4  # Exponential backoff
                 with self.print_lock:
                     print(f"   [{threading.current_thread().name}] ⚠️  Lỗi: {e}")
                     print(f"   [{threading.current_thread().name}] 🔄 Thử lại sau {delay}s... (lần {retry_count + 1}/{self.max_retries})")
@@ -583,8 +585,8 @@ Examples:
                        help="Number of concurrent threads (default: 4)")
     parser.add_argument("-c", "--cookies", default="cookies.txt",
                        help="Cookie file (default: cookies.txt)")
-    parser.add_argument("-d", "--delay", nargs=2, type=float, default=[3.0, 5.0],
-                   metavar=("MIN", "MAX"), help="Delay range between requests (default: 5.0 10.0)")
+    parser.add_argument("-d", "--delay", nargs=2, type=float, default=[5.0, 8.0],
+                   metavar=("MIN", "MAX"), help="Delay range between requests (default: 5.0 8.0)")
     parser.add_argument("-r", "--retry", type=int, default=3,
                        help="Number of retries per URL (default: 3)")
     parser.add_argument("--resume", action="store_true",

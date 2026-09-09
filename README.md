@@ -20,8 +20,8 @@ cd thuvienphapluat-crawler
 # Cài đặt dependencies với uv
 uv sync
 
-# Cài đặt Playwright browsers
-uv run playwright install chromium
+# Cài đặt Patchright browsers
+uv run patchright install chromium
 ```
 
 ## Sử dụng

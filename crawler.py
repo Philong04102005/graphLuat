@@ -3,7 +3,7 @@ import os
 
 import requests
 from bs4 import BeautifulSoup
-from playwright.sync_api import sync_playwright
+from patchright.sync_api import sync_playwright
 
 
 def load_cookies_from_file(cookie_file: str) -> list:

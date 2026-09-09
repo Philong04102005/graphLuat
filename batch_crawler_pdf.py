@@ -5,7 +5,7 @@ import os
 import re
 import random
 
-from playwright.async_api import async_playwright
+from patchright.async_api import async_playwright
 
 
 # ======================
@@ -14,7 +14,7 @@ from playwright.async_api import async_playwright
 DATA_JSON = "data_all_law.json"
 COOKIES_FILE = "cookies.txt"
 DOWNLOAD_DIR = "downloads_pdf"
-DELAY_RANGE = (0, 1)
+DELAY_RANGE = (2, 3)
 
 PDF_BTN = "#ctl00_Content_ThongTinVB_filePDFHyperLink"
 ORIGINAL_BTN = "#ctl00_Content_ThongTinVB_pdfHyperLink"

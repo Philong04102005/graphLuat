@@ -3,7 +3,7 @@ import asyncio
 import random
 from datetime import datetime, timedelta
 from collections import Counter
-from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
+from patchright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
 
 # ======================
 # CONFIG
@@ -16,8 +16,8 @@ ROOT_URLS = [
 COOKIES_FILE = "check_hieu_luc/cookies.txt"
 OUTPUT_TXT = "check_hieu_luc/output_related_status.txt"
 MAX_RELATED_PER_ROOT = 5
-DELAY_RANGE = (2, 4)
-RETRY_DELAY_RANGE = (5, 8)
+DELAY_RANGE = (4, 7)
+RETRY_DELAY_RANGE = (8, 12)
 
 # ======================
 # LOGGING
